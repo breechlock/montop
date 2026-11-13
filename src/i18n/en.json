@@ -1,0 +1,4 @@
+{
+  "%n processes": { "one": "%n process", "other": "%n processes" },
+  "%n threads": { "one": "%n thread", "other": "%n threads" }
+}

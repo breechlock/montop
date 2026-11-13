@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vitals
+Comment=See what your system is doing: CPU, memory, disks, network, and processes
+Comment[nl]=Zie wat je systeem doet: CPU, geheugen, schijven, netwerk en processen
+Exec=vitals
+Icon=vitals
+Terminal=false
+Categories=System;Monitor;
+Keywords=monitor;task manager;processes;cpu;memory;disk;network;htop;btop;
+StartupWMClass=vitals
