@@ -30,6 +30,34 @@ ApplicationWindow {
     readonly property bool typing: processes.filtering || confirm.visible
     readonly property bool leftColumn: showMemory || showDisks || showNetwork
 
+    // The frame clock every graph shares: 0 when a sample lands, 1 when the
+    // next is due. Advanced once per frame while there's motion to show and
+    // the window is visible; idle otherwise, so a paused or hidden window
+    // costs nothing.
+    property real phase: 1
+    property double sampledAt: 0
+    Connections {
+        target: monitor
+        function onSampled() {
+            win.sampledAt = Date.now()
+            win.phase = 0
+        }
+        function onPausedChanged() {
+            if (monitor.paused)
+                win.phase = 1
+        }
+    }
+    // Graphs move 2 pixels a sample, so the clock ticks about as often as
+    // they cross a device pixel, and each tick that moves nothing draws
+    // nothing. A timer rather than a FrameAnimation: a running animation
+    // keeps Qt redrawing at the display's full rate even when nothing changed.
+    Timer {
+        interval: Math.max(16, Math.floor(monitor.interval / (2 * Screen.devicePixelRatio) / 2))
+        repeat: true
+        running: win.phase < 1 && !monitor.paused && win.visibility !== Window.Minimized
+        onTriggered: win.phase = Math.min(1, (Date.now() - win.sampledAt) / monitor.interval)
+    }
+
     property string message
     property bool messageIsError: false
     function say(text, error) {
@@ -96,13 +124,13 @@ ApplicationWindow {
         sequences: ["+", "="]
         context: Qt.ApplicationShortcut
         enabled: !win.typing
-        onActivated: { monitor.slower(); win.say(qsTr("Updating every %1 s").arg((monitor.interval / 1000).toLocaleString(Qt.locale(), 'f', 2))) }
+        onActivated: { monitor.slower(); win.say(qsTr("Updating every %1 s").arg((monitor.interval / 1000).toLocaleString(Qt.locale(), 'f', 3).replace(/[.,]?0+$/, ""))) }
     }
     Shortcut {
         sequence: "-"
         context: Qt.ApplicationShortcut
         enabled: !win.typing
-        onActivated: { monitor.faster(); win.say(qsTr("Updating every %1 s").arg((monitor.interval / 1000).toLocaleString(Qt.locale(), 'f', 2))) }
+        onActivated: { monitor.faster(); win.say(qsTr("Updating every %1 s").arg((monitor.interval / 1000).toLocaleString(Qt.locale(), 'f', 3).replace(/[.,]?0+$/, ""))) }
     }
     Shortcut { sequence: "1"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.showCpu = !win.showCpu }
     Shortcut { sequence: "2"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.showMemory = !win.showMemory }
@@ -140,7 +168,7 @@ ApplicationWindow {
                     font.bold: true
                 }
                 Label {
-                    text: { translator.language; return qsTr("every %1 s").arg((monitor.interval / 1000).toLocaleString(Qt.locale(), 'f', monitor.interval % 1000 ? 2 : 0)) }
+                    text: { translator.language; return qsTr("every %1 s").arg((monitor.interval / 1000).toLocaleString(Qt.locale(), 'f', 3).replace(/[.,]?0+$/, "")) }
                     color: theme.colors.dark_foreground
                 }
             }

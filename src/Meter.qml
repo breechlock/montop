@@ -2,6 +2,10 @@ import QtQuick
 
 // A thin horizontal gauge. By default it colors itself by how full it is,
 // green to yellow to red from the theme, like btop's meters.
+//
+// It moves straight to each sample. At four samples a second that already
+// reads as live, and easing twenty-odd gauges in QML between samples cost
+// more CPU than everything else in the window together.
 Item {
     id: meter
 
@@ -18,13 +22,10 @@ Item {
     }
 
     Rectangle {
+        // Snapped to device pixels: an unchanged width asks for no frame.
         height: parent.height
-        width: Math.max(0, Math.min(1, meter.value)) * parent.width
+        width: Math.round(Math.max(0, Math.min(1, meter.value)) * parent.width * Screen.devicePixelRatio) / Screen.devicePixelRatio
         radius: Math.min(3, theme.radius)
         color: meter.color
-
-        Behavior on width {
-            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
-        }
     }
 }

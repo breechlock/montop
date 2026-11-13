@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Vitals
 
 Panel {
     id: root
@@ -21,13 +20,16 @@ Panel {
         spacing: 6
 
         // Connected interfaces get a graph, downloads above and uploads below;
-        // the rest are listed with their totals.
+        // the rest are listed with their totals. The model is a count so
+        // delegates live on between samples.
         Repeater {
-            model: monitor.networks
+            model: monitor.networks.length
             delegate: ColumnLayout {
-                required property var modelData
+                id: link
                 required property int index
-                readonly property bool graphed: modelData.up && index < 2
+                readonly property var info: monitor.networks[index] || ({})
+                readonly property bool up: !!info.up
+                readonly property bool graphed: up && index < 2
 
                 Layout.fillWidth: true
                 Layout.fillHeight: graphed
@@ -38,33 +40,32 @@ Panel {
                     spacing: 12
                     Label {
                         Layout.fillWidth: true
-                        text: modelData.name
-                        color: modelData.up ? theme.colors.bright_foreground : theme.colors.dark_foreground
+                        text: link.info.name || ""
+                        color: link.up ? theme.colors.bright_foreground : theme.colors.dark_foreground
                         elide: Text.ElideRight
                     }
                     Label {
-                        text: "▼ " + (modelData.up ? monitor.rate(modelData.rxRate) : monitor.bytes(modelData.rxTotal))
-                        color: modelData.up ? theme.colors.cyan : theme.colors.dark_foreground
+                        text: "▼ " + (link.up ? monitor.rate(link.info.rxRate || 0) : monitor.bytes(link.info.rxTotal || 0))
+                        color: link.up ? theme.colors.cyan : theme.colors.dark_foreground
                     }
                     Label {
-                        text: "▲ " + (modelData.up ? monitor.rate(modelData.txRate) : monitor.bytes(modelData.txTotal))
-                        color: modelData.up ? theme.colors.magenta : theme.colors.dark_foreground
+                        text: "▲ " + (link.up ? monitor.rate(link.info.txRate || 0) : monitor.bytes(link.info.txTotal || 0))
+                        color: link.up ? theme.colors.magenta : theme.colors.dark_foreground
                     }
                 }
-                Sparkline {
-                    visible: graphed
+                Graph {
+                    visible: link.graphed
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.minimumHeight: 28
-                    values: modelData.rxHistory
-                    mirror: modelData.txHistory
+                    series: "net/" + (link.info.name || "") + "/rx"
+                    mirrorSeries: "net/" + (link.info.name || "") + "/tx"
                     color: theme.colors.cyan
                     mirrorColor: theme.colors.magenta
-                    gridColor: theme.colors.selection
                 }
                 Label {
-                    visible: graphed
-                    text: qsTr("Total ▼ %1  ▲ %2").arg(monitor.bytes(modelData.rxTotal)).arg(monitor.bytes(modelData.txTotal))
+                    visible: link.graphed
+                    text: qsTr("Total ▼ %1  ▲ %2").arg(monitor.bytes(link.info.rxTotal || 0)).arg(monitor.bytes(link.info.txTotal || 0))
                     color: theme.colors.dark_foreground
                 }
             }

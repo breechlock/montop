@@ -1,10 +1,19 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Vitals
 
 Panel {
     id: root
+
+    function amount(kind) {
+        switch (kind) {
+        case "used": return monitor.memoryUsed
+        case "cached": return monitor.memoryCached
+        case "available": return monitor.memoryAvailable
+        case "swap": return monitor.swapUsed
+        }
+        return 0
+    }
 
     title: qsTr("Memory")
     key: "2"
@@ -14,45 +23,53 @@ Panel {
         anchors.fill: parent
         spacing: 6
 
-        Sparkline {
+        Graph {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: 24
-            values: monitor.memoryHistory
+            series: "memory"
             maximum: 1
             color: theme.colors.magenta
-            gridColor: theme.colors.selection
         }
 
+        // The rows are fixed and read their numbers live, so they aren't
+        // rebuilt on every sample and their gauges can glide.
         Repeater {
-            model: [
-                { label: qsTr("Used"), value: monitor.memoryUsed, total: monitor.memoryTotal, color: "" },
-                { label: qsTr("Cached"), value: monitor.memoryCached, total: monitor.memoryTotal, color: theme.colors.blue },
-                { label: qsTr("Available"), value: monitor.memoryAvailable, total: monitor.memoryTotal, color: theme.colors.cyan },
-                { label: qsTr("Swap"), value: monitor.swapUsed, total: monitor.swapTotal, color: "" },
-            ]
+            model: ["used", "cached", "available", "swap"]
             delegate: RowLayout {
-                required property var modelData
+                id: memoryRow
+                required property string modelData
+                readonly property real total: modelData === "swap" ? monitor.swapTotal : monitor.memoryTotal
+                readonly property real amount: root.amount(modelData)
+
                 Layout.fillWidth: true
                 spacing: 10
-                visible: modelData.total > 0
+                visible: total > 0
 
                 Label {
                     Layout.preferredWidth: 100
-                    text: modelData.label
+                    text: {
+                        switch (memoryRow.modelData) {
+                        case "used": return qsTr("Used")
+                        case "cached": return qsTr("Cached")
+                        case "available": return qsTr("Available")
+                        }
+                        return qsTr("Swap")
+                    }
                     color: theme.colors.dark_foreground
                     elide: Text.ElideRight
                 }
                 Meter {
                     Layout.fillWidth: true
-                    value: modelData.total > 0 ? modelData.value / modelData.total : 0
-                    color: modelData.color !== "" ? modelData.color
+                    value: memoryRow.total > 0 ? memoryRow.amount / memoryRow.total : 0
+                    color: memoryRow.modelData === "cached" ? theme.colors.blue
+                         : memoryRow.modelData === "available" ? theme.colors.cyan
                          : value < 0.5 ? theme.colors.green : value < 0.8 ? theme.colors.yellow : theme.colors.red
                 }
                 Label {
                     Layout.preferredWidth: 80
                     horizontalAlignment: Text.AlignRight
-                    text: monitor.bytes(modelData.value)
+                    text: monitor.bytes(memoryRow.amount)
                     color: theme.colors.foreground
                 }
             }

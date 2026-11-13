@@ -37,8 +37,11 @@ Monitor::Monitor(const QString &procRoot, const QString &sysRoot, QObject *paren
     m_temperatureInput = findTemperatureInput();
 
     m_clock.start();
-    m_timer.setInterval(1000);
-    connect(&m_timer, &QTimer::timeout, this, &Monitor::sample);
+    // Graphs scroll between samples, so a late tick shows as a stutter; a
+    // precise timer keeps the beat even.
+    m_timer.setTimerType(Qt::PreciseTimer);
+    m_timer.setInterval(250);
+    connect(&m_timer, &QTimer::timeout, this, &Monitor::tick);
 
     sample();
 }
@@ -48,13 +51,13 @@ void Monitor::start() {
     // the second soon rather than showing zeros for a whole interval.
     QTimer::singleShot(250, this, [this] {
         if (!m_paused)
-            sample();
+            tick();
     });
     m_timer.start();
 }
 
 void Monitor::setInterval(int ms) {
-    ms = std::clamp(ms, 250, 10000);
+    ms = std::clamp(ms, 125, 4000);
     if (ms == m_timer.interval())
         return;
     m_timer.setInterval(ms);
@@ -62,13 +65,11 @@ void Monitor::setInterval(int ms) {
 }
 
 void Monitor::faster() {
-    const int ms = interval();
-    setInterval(ms > 1000 ? ms - 1000 : ms / 2);
+    setInterval(interval() / 2);
 }
 
 void Monitor::slower() {
-    const int ms = interval();
-    setInterval(ms >= 1000 ? ms + 1000 : ms * 2);
+    setInterval(interval() * 2);
 }
 
 void Monitor::setPaused(bool paused) {
@@ -80,7 +81,7 @@ void Monitor::setPaused(bool paused) {
     } else {
         // The first sample after a pause would spread the paused time over
         // one interval; resetting the baseline keeps the rates honest.
-        m_lastSample = -1;
+        m_lastSample = m_lastProcessSample = -1;
         sample();
         m_timer.start();
     }
@@ -108,13 +109,35 @@ QString Monitor::rate(double bytesPerSecond) {
     return bytes(bytesPerSecond) + "/s";
 }
 
-void Monitor::push(QList<qreal> &history, qreal value) {
+void Monitor::push(const QString &series, qreal value) {
+    QList<qreal> &history = m_history[series];
     history.append(value);
     if (history.size() > HistoryLength)
         history.remove(0, history.size() - HistoryLength);
 }
 
+int Monitor::processInterval() const {
+    // Scanning every process costs far more than the system counters and a
+    // table rewritten four times a second can't be read anyway, so the
+    // process list keeps a calmer pace of its own.
+    return std::max(1000, interval() * 2);
+}
+
 void Monitor::sample() {
+    sampleSystem();
+    sampleProcessTable();
+    emit sampled();
+}
+
+void Monitor::tick() {
+    sampleSystem();
+    // Half an interval of slack, so timer jitter doesn't skip a beat.
+    if (m_lastProcessSample < 0 || m_clock.elapsed() - m_lastProcessSample >= processInterval() - interval() / 2)
+        sampleProcessTable();
+    emit sampled();
+}
+
+void Monitor::sampleSystem() {
     const qint64 now = m_clock.elapsed();
     const double seconds = m_lastSample < 0 ? 0 : (now - m_lastSample) / 1000.0;
     m_lastSample = now;
@@ -122,10 +145,22 @@ void Monitor::sample() {
     sampleCpu();
     sampleMemory();
     sampleDisks(seconds);
-    sampleFilesystems();
     sampleNetworks(seconds);
-    sampleProcesses(seconds);
-    emit sampled();
+}
+
+void Monitor::sampleProcessTable() {
+    const qint64 now = m_clock.elapsed();
+    const double seconds = m_lastProcessSample < 0 ? 0 : (now - m_lastProcessSample) / 1000.0;
+    m_lastProcessSample = now;
+
+    // The process scan runs at its own pace, so it measures CPU time against
+    // its own previous reading, not the last system sample's.
+    const quint64 total = m_prevCpu.isEmpty() ? 0 : m_prevCpu[0].total;
+    const quint64 delta = seconds > 0 && total > m_processCpuTotal ? total - m_processCpuTotal : 0;
+    m_processCpuTotal = total;
+
+    sampleFilesystems();
+    sampleProcesses(seconds, delta);
 }
 
 void Monitor::sampleCpu() {
@@ -142,9 +177,8 @@ void Monitor::sampleCpu() {
     };
 
     const bool hasPrevious = m_prevCpu.size() == times.size();
-    m_cpuTotalDelta = hasPrevious ? times[0].total - m_prevCpu[0].total : 0;
     m_cpuUsage = hasPrevious ? usage(times[0], m_prevCpu[0]) : 0;
-    push(m_cpuHistory, m_cpuUsage);
+    push("cpu", m_cpuUsage);
 
     QVariantList cores;
     double frequencySum = 0;
@@ -203,7 +237,7 @@ void Monitor::sampleMemory() {
     m_memCached = info.value("Cached") + info.value("Buffers") + info.value("SReclaimable");
     m_swapTotal = info.value("SwapTotal");
     m_swapUsed = std::max(0.0, m_swapTotal - double(info.value("SwapFree")));
-    push(m_memHistory, m_memTotal > 0 ? m_memUsed / m_memTotal : 0);
+    push("memory", m_memTotal > 0 ? m_memUsed / m_memTotal : 0);
 }
 
 void Monitor::sampleDisks(double seconds) {
@@ -233,8 +267,8 @@ void Monitor::sampleDisks(double seconds) {
             writeRate = (now.writeBytes - before.writeBytes) / seconds;
             busy = std::min(1.0, (now.busyMs - before.busyMs) / (seconds * 1000));
         }
-        push(m_diskRead[name], readRate);
-        push(m_diskWrite[name], writeRate);
+        push("disk/" + name + "/read", readRate);
+        push("disk/" + name + "/write", writeRate);
         // The model says more than "nvme0n1" to most people.
         const QString model = readLine(block.filePath(name + "/device/model"));
         disks.append(QVariantMap{
@@ -243,8 +277,6 @@ void Monitor::sampleDisks(double seconds) {
             {"readRate", readRate},
             {"writeRate", writeRate},
             {"busy", busy},
-            {"readHistory", QVariant::fromValue(m_diskRead[name])},
-            {"writeHistory", QVariant::fromValue(m_diskWrite[name])},
         });
     }
     m_prevDisks = previous;
@@ -283,8 +315,8 @@ void Monitor::sampleNetworks(double seconds) {
             rx = (now.rxBytes - before.rxBytes) / seconds;
             tx = (now.txBytes - before.txBytes) / seconds;
         }
-        push(m_netRx[now.name], rx);
-        push(m_netTx[now.name], tx);
+        push("net/" + now.name + "/rx", rx);
+        push("net/" + now.name + "/tx", tx);
         const bool up = readLine(QString("%1/class/net/%2/operstate").arg(m_sys, now.name)) == "up";
         if (!up && now.rxBytes + now.txBytes == 0)
             continue;
@@ -292,8 +324,6 @@ void Monitor::sampleNetworks(double seconds) {
                          {"name", now.name}, {"up", up},
                          {"rxRate", rx}, {"txRate", tx},
                          {"rxTotal", double(now.rxBytes)}, {"txTotal", double(now.txBytes)},
-                         {"rxHistory", QVariant::fromValue(m_netRx[now.name])},
-                         {"txHistory", QVariant::fromValue(m_netTx[now.name])},
                      },
                      up, double(now.rxBytes + now.txBytes)});
     }
@@ -320,7 +350,7 @@ QString Monitor::userName(uint uid) {
     return name;
 }
 
-void Monitor::sampleProcesses(double seconds) {
+void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
     DIR *dir = opendir(QFile::encodeName(m_proc).constData());
     if (!dir)
         return;
@@ -328,7 +358,7 @@ void Monitor::sampleProcesses(double seconds) {
     // A process's share is measured against one core's worth of ticks, so a
     // process saturating two cores shows 200 %, as in top and htop.
     const int cores = std::max(1, int(m_cores.size()));
-    const double ticksPerCore = m_cpuTotalDelta > 0 ? double(m_cpuTotalDelta) / cores : 0;
+    const double ticksPerCore = cpuTotalDelta > 0 ? double(cpuTotalDelta) / cores : 0;
 
     QList<ProcessInfo> processes;
     QHash<int, PidHistory> seen;

@@ -22,7 +22,7 @@ language picked under Setup > Language.
 | --- | --- |
 | `?` | Show or hide shortcuts |
 | `Space` | Pause or resume updates |
-| `+` / `-` | Update less or more often (0.25 s to 10 s) |
+| `+` / `-` | Sample less or more often (0.125 s to 4 s; 0.25 s by default) |
 | `1` – `5` | Show or hide CPU, memory, disks, network, processes |
 | `↑` `↓` / `j` `k` | Select a process |
 | `PgUp` `PgDn` | Move a page |
@@ -35,6 +35,13 @@ language picked under Setup > Language.
 | `x` | End the selected process (SIGTERM), after asking |
 | `Shift X` | Kill the selected process (SIGKILL), after asking |
 | `q` | Quit |
+
+Graphs are drawn by the GPU through Qt Quick's scene graph and scroll
+continuously between samples at a fixed 2 pixels per sample, so a wider window
+shows more history. A frame is drawn only when something moves by a whole
+pixel, which keeps Vitals at about 4 % of one core while it runs. The process
+list refreshes once a second (or every two samples, if slower), since a table
+rewritten faster than that can't be read.
 
 CPU% is measured against one core, as in top and htop, so a process busy on two
 cores shows 200. Per-process disk IO shows a dash for processes owned by other

@@ -3,6 +3,7 @@
         <file alias="Main.qml">Main.qml</file>
         <file alias="Panel.qml">Panel.qml</file>
         <file alias="Meter.qml">Meter.qml</file>
+        <file alias="Graph.qml">Graph.qml</file>
         <file alias="CpuPanel.qml">CpuPanel.qml</file>
         <file alias="MemoryPanel.qml">MemoryPanel.qml</file>
         <file alias="DiskPanel.qml">DiskPanel.qml</file>

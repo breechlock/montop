@@ -21,7 +21,6 @@ class Monitor : public QObject {
     Q_PROPERTY(QString cpuModel READ cpuModel CONSTANT)
     Q_PROPERTY(int coreCount READ coreCount NOTIFY sampled)
     Q_PROPERTY(double cpuUsage READ cpuUsage NOTIFY sampled)
-    Q_PROPERTY(QList<qreal> cpuHistory READ cpuHistory NOTIFY sampled)
     Q_PROPERTY(QVariantList cores READ cores NOTIFY sampled)
     Q_PROPERTY(double cpuTemperature READ cpuTemperature NOTIFY sampled)
     Q_PROPERTY(double cpuFrequency READ cpuFrequency NOTIFY sampled)
@@ -34,7 +33,6 @@ class Monitor : public QObject {
     Q_PROPERTY(double memoryFree READ memoryFree NOTIFY sampled)
     Q_PROPERTY(double swapTotal READ swapTotal NOTIFY sampled)
     Q_PROPERTY(double swapUsed READ swapUsed NOTIFY sampled)
-    Q_PROPERTY(QList<qreal> memoryHistory READ memoryHistory NOTIFY sampled)
     Q_PROPERTY(QVariantList disks READ disks NOTIFY sampled)
     Q_PROPERTY(QVariantList filesystems READ filesystems NOTIFY sampled)
     Q_PROPERTY(QVariantList networks READ networks NOTIFY sampled)
@@ -46,7 +44,10 @@ class Monitor : public QObject {
 
 public:
     // How many samples each graph remembers.
-    static constexpr int HistoryLength = 150;
+    // Graphs scroll at a fixed speed and a wide one shows more of the past,
+    // so keep enough for a full-screen graph: about four minutes at the
+    // default four samples a second.
+    static constexpr int HistoryLength = 1024;
 
     explicit Monitor(const QString &procRoot = "/proc", const QString &sysRoot = "/sys", QObject *parent = nullptr);
 
@@ -55,7 +56,6 @@ public:
     QString cpuModel() const { return m_cpuModel; }
     int coreCount() const { return m_cores.size(); }
     double cpuUsage() const { return m_cpuUsage; }
-    QList<qreal> cpuHistory() const { return m_cpuHistory; }
     QVariantList cores() const { return m_cores; }
     double cpuTemperature() const { return m_cpuTemperature; }
     double cpuFrequency() const { return m_cpuFrequency; }
@@ -68,7 +68,6 @@ public:
     double memoryFree() const { return m_memFree; }
     double swapTotal() const { return m_swapTotal; }
     double swapUsed() const { return m_swapUsed; }
-    QList<qreal> memoryHistory() const { return m_memHistory; }
     QVariantList disks() const { return m_disks; }
     QVariantList filesystems() const { return m_filesystems; }
     QVariantList networks() const { return m_networks; }
@@ -77,6 +76,11 @@ public:
     ProcessModel *processes() { return &m_processes; }
     int interval() const { return m_timer.interval(); }
     bool paused() const { return m_paused; }
+
+    // A series by name, for graphs to read straight from C++ rather than
+    // through a copy into QML on every sample: "cpu", "memory",
+    // "disk/<name>/read", "disk/<name>/write", "net/<name>/rx", "net/<name>/tx".
+    QList<qreal> history(const QString &series) const { return m_history.value(series); }
 
     void setInterval(int ms);
     void setPaused(bool paused);
@@ -95,8 +99,9 @@ public:
     // Starts sampling on the timer.
     void start();
 
-    // Takes one sample now. The timer calls this; tests call it directly.
+    // Takes one full sample now, processes included. Tests call this.
     void sample();
+    int processInterval() const;
 
 signals:
     void sampled();
@@ -109,36 +114,38 @@ private:
     void sampleDisks(double seconds);
     void sampleFilesystems();
     void sampleNetworks(double seconds);
-    void sampleProcesses(double seconds);
+    void tick();
+    void sampleSystem();
+    void sampleProcessTable();
+    void sampleProcesses(double seconds, quint64 cpuTotalDelta);
     QString findTemperatureInput() const;
     QString userName(uint uid);
-    static void push(QList<qreal> &history, qreal value);
+    void push(const QString &series, qreal value);
 
     QString m_proc, m_sys;
     QTimer m_timer;
     QElapsedTimer m_clock;
     qint64 m_lastSample = -1;
+    qint64 m_lastProcessSample = -1;
+    quint64 m_processCpuTotal = 0;
     bool m_paused = false;
     QString m_error;
 
     QString m_hostname, m_kernel, m_cpuModel, m_temperatureInput;
     QList<procfs::CpuTimes> m_prevCpu;
-    quint64 m_cpuTotalDelta = 0;
     double m_cpuUsage = 0, m_cpuTemperature = -1, m_cpuFrequency = 0;
-    QList<qreal> m_cpuHistory, m_loadAverage;
+    QHash<QString, QList<qreal>> m_history;
+    QList<qreal> m_loadAverage;
     QVariantList m_cores;
     qint64 m_uptime = 0;
 
     double m_memTotal = 0, m_memUsed = 0, m_memAvailable = 0, m_memCached = 0, m_memFree = 0;
     double m_swapTotal = 0, m_swapUsed = 0;
-    QList<qreal> m_memHistory;
 
     QHash<QString, procfs::DiskCounters> m_prevDisks;
-    QHash<QString, QList<qreal>> m_diskRead, m_diskWrite;
     QVariantList m_disks, m_filesystems;
 
     QHash<QString, procfs::NetCounters> m_prevNet;
-    QHash<QString, QList<qreal>> m_netRx, m_netTx;
     QVariantList m_networks;
 
     struct PidHistory {

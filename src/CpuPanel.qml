@@ -27,16 +27,17 @@ Panel {
         spacing: 16
 
         Item {
+            id: total
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            Sparkline {
+            Graph {
                 anchors.fill: parent
-                values: monitor.cpuHistory
+                series: "cpu"
                 maximum: 1
                 color: theme.accent
-                gridColor: theme.colors.selection
             }
+
 
             Column {
                 x: 8
@@ -69,11 +70,13 @@ Panel {
             columnSpacing: 18
             rowSpacing: 0
 
+            // A count, not the list itself: a list model would rebuild every
+            // gauge on every sample, and their animations with them.
             Repeater {
-                model: monitor.cores
+                model: monitor.coreCount
                 delegate: Row {
-                    required property var modelData
                     required property int index
+                    readonly property real usage: monitor.cores[index] ? monitor.cores[index].usage : 0
                     height: grid.rowHeight
                     spacing: 8
 
@@ -84,14 +87,15 @@ Panel {
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Meter {
+                        id: gauge
                         width: 70
-                        value: modelData.usage
+                        value: usage
                         anchors.verticalCenter: parent.verticalCenter
                     }
                     Label {
                         width: 40
                         horizontalAlignment: Text.AlignRight
-                        text: root.percent(modelData.usage)
+                        text: root.percent(usage)
                         color: theme.colors.foreground
                         anchors.verticalCenter: parent.verticalCenter
                     }
