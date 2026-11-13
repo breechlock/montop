@@ -1,6 +1,5 @@
 #include "processmodel.h"
 
-#include <QSet>
 #include <algorithm>
 
 ProcessModel::ProcessModel(QObject *parent) : QAbstractListModel(parent) {}
@@ -9,11 +8,61 @@ int ProcessModel::rowCount(const QModelIndex &parent) const {
     return parent.isValid() ? 0 : m_rows.size();
 }
 
+int ProcessModel::total() const {
+    if (m_showKernel)
+        return m_all.size();
+    return int(std::count_if(m_all.begin(), m_all.end(), [](const ProcessInfo &p) { return !p.kernel; }));
+}
+
+int ProcessModel::groupCount() const {
+    if (m_showKernel)
+        return m_groups.size();
+    return int(std::count_if(m_groups.begin(), m_groups.end(), [](const GroupInfo &g) { return g.kind != "kernel"; }));
+}
+
 QVariant ProcessModel::data(const QModelIndex &index, int role) const {
     if (!index.isValid() || index.row() >= m_rows.size())
         return {};
-    const ProcessInfo &p = m_rows.at(index.row());
+    const Row &row = m_rows.at(index.row());
+    if (row.index < 0)
+        return {};
     switch (role) {
+    case KeyRole: return row.key;
+    case IsGroupRole: return row.group;
+    case DepthRole: return row.depth;
+    }
+
+    if (row.group) {
+        const GroupInfo &g = m_groups.at(row.index);
+        switch (role) {
+        case ExpandedRole: return m_expanded.contains(g.key);
+        case ProcessCountRole: return int(g.pids.size());
+        case KindRole: return g.kind;
+        case UnitRole: return g.units.value(0);
+        case PidRole: return 0;
+        case PpidRole: return 0;
+        case Qt::DisplayRole:
+        case NameRole: return g.name;
+        case CommandRole: return g.units.join(", ");
+        case UserRole: return g.user;
+        case StateRole: return QString();
+        case ThreadsRole: return g.threads;
+        case CpuRole: return g.cpu;
+        case MemoryRole: return double(g.memory);
+        case MemoryShareRole: return g.memoryShare;
+        case ReadRateRole: return g.readRate;
+        case WriteRateRole: return g.writeRate;
+        case KernelRole: return g.kind == "kernel";
+        }
+        return {};
+    }
+
+    const ProcessInfo &p = m_all.at(row.index);
+    switch (role) {
+    case ExpandedRole: return false;
+    case ProcessCountRole: return 1;
+    case KindRole: return QString();
+    case UnitRole: return p.group;
     case PidRole: return p.pid;
     case PpidRole: return p.ppid;
     case Qt::DisplayRole:
@@ -34,6 +83,8 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const {
 
 QHash<int, QByteArray> ProcessModel::roleNames() const {
     return {
+        {KeyRole, "key"}, {IsGroupRole, "isGroup"}, {DepthRole, "depth"}, {ExpandedRole, "expanded"},
+        {ProcessCountRole, "processCount"}, {KindRole, "kind"}, {UnitRole, "unit"},
         {PidRole, "pid"}, {PpidRole, "ppid"}, {NameRole, "name"}, {CommandRole, "command"},
         {UserRole, "user"}, {StateRole, "state"}, {ThreadsRole, "threads"}, {CpuRole, "cpu"},
         {MemoryRole, "memory"}, {MemoryShareRole, "memoryShare"}, {ReadRateRole, "readRate"},
@@ -75,6 +126,24 @@ void ProcessModel::setShowKernelThreads(bool show) {
     apply();
 }
 
+void ProcessModel::setGrouped(bool grouped) {
+    if (grouped == m_grouped)
+        return;
+    m_grouped = grouped;
+    emit groupedChanged();
+    apply();
+}
+
+void ProcessModel::setExpanded(const QString &groupKey, bool expanded) {
+    if (expanded == m_expanded.contains(groupKey))
+        return;
+    if (expanded)
+        m_expanded.insert(groupKey);
+    else
+        m_expanded.remove(groupKey);
+    apply();
+}
+
 void ProcessModel::sortBy(Column column) {
     if (column == m_column)
         setDescending(!m_descending);
@@ -87,86 +156,177 @@ void ProcessModel::cycleSort() {
     setSortColumn(order.at((order.indexOf(m_column) + 1) % order.size()));
 }
 
-int ProcessModel::rowOf(int pid) const {
+int ProcessModel::rowOf(const QString &key) const {
     for (int i = 0; i < m_rows.size(); ++i)
-        if (m_rows[i].pid == pid)
+        if (m_rows[i].key == key)
             return i;
     return -1;
 }
 
-int ProcessModel::pidAt(int row) const {
-    return row >= 0 && row < m_rows.size() ? m_rows[row].pid : 0;
+QString ProcessModel::keyAt(int row) const {
+    return row >= 0 && row < m_rows.size() ? m_rows[row].key : QString();
+}
+
+QString ProcessModel::parentKey(const QString &key) const {
+    if (!m_grouped || !key.startsWith("p:"))
+        return {};
+    const auto it = m_byPid.constFind(key.mid(2).toInt());
+    return it == m_byPid.constEnd() ? QString() : "g:" + m_all[*it].group;
 }
 
 QVariantMap ProcessModel::get(int row) const {
     QVariantMap map;
-    if (row < 0 || row >= m_rows.size())
+    if (row < 0 || row >= m_rows.size() || m_rows[row].index < 0)
         return map;
     const QHash<int, QByteArray> roles = roleNames();
     for (auto it = roles.begin(); it != roles.end(); ++it)
         map.insert(QString::fromLatin1(it.value()), data(index(row), it.key()));
+    if (m_rows[row].group)
+        map.insert("pids", QVariant::fromValue(m_groups[m_rows[row].index].pids));
     return map;
 }
 
-void ProcessModel::update(const QList<ProcessInfo> &processes) {
+void ProcessModel::update(const QList<ProcessInfo> &processes, const QList<GroupInfo> &groups) {
     m_all = processes;
+    m_groups = groups;
+    m_byPid.clear();
+    for (int i = 0; i < m_all.size(); ++i)
+        m_byPid.insert(m_all[i].pid, i);
     apply();
 }
 
-QList<ProcessInfo> ProcessModel::visible() const {
-    QList<ProcessInfo> rows;
-    rows.reserve(m_all.size());
+namespace {
+template <typename T> int compare(const T &a, const T &b) { return a < b ? -1 : b < a ? 1 : 0; }
+
+// Ties fall back to a stable key, so equal rows don't shuffle every sample.
+template <typename Key> bool ordered(int c, bool descending, const Key &a, const Key &b) {
+    if (c != 0)
+        return descending ? c > 0 : c < 0;
+    return a < b;
+}
+} // namespace
+
+bool ProcessModel::lessThan(const ProcessInfo &a, const ProcessInfo &b, Column column, bool descending) {
+    int c = 0;
+    switch (column) {
+    case Pid: c = compare(a.pid, b.pid); break;
+    case Name: c = a.name.compare(b.name, Qt::CaseInsensitive); break;
+    case User: c = a.user.compare(b.user, Qt::CaseInsensitive); break;
+    case Cpu: c = compare(a.cpu, b.cpu); break;
+    case Memory: c = compare(a.memory, b.memory); break;
+    case Read: c = compare(a.readRate, b.readRate); break;
+    case Write: c = compare(a.writeRate, b.writeRate); break;
+    case Threads: c = compare(a.threads, b.threads); break;
+    }
+    return ordered(c, descending, a.pid, b.pid);
+}
+
+bool ProcessModel::lessThan(const GroupInfo &a, const GroupInfo &b, Column column, bool descending) {
+    int c = 0;
+    switch (column) {
+    case Pid: c = compare(a.pids.size(), b.pids.size()); break;
+    case Name: c = a.name.compare(b.name, Qt::CaseInsensitive); break;
+    case User: c = a.user.compare(b.user, Qt::CaseInsensitive); break;
+    case Cpu: c = compare(a.cpu, b.cpu); break;
+    case Memory: c = compare(a.memory, b.memory); break;
+    case Read: c = compare(a.readRate, b.readRate); break;
+    case Write: c = compare(a.writeRate, b.writeRate); break;
+    case Threads: c = compare(a.threads, b.threads); break;
+    }
+    return ordered(c, descending, a.key, b.key);
+}
+
+bool ProcessModel::matches(const ProcessInfo &p) const {
     const QString needle = m_filter.trimmed();
-    for (const ProcessInfo &p : m_all) {
-        if (p.kernel && !m_showKernel)
-            continue;
-        if (!needle.isEmpty() && !p.name.contains(needle, Qt::CaseInsensitive)
-            && !p.command.contains(needle, Qt::CaseInsensitive) && !p.user.contains(needle, Qt::CaseInsensitive)
-            && !QString::number(p.pid).startsWith(needle))
-            continue;
-        rows.append(p);
+    return needle.isEmpty() || p.name.contains(needle, Qt::CaseInsensitive)
+           || p.command.contains(needle, Qt::CaseInsensitive) || p.user.contains(needle, Qt::CaseInsensitive)
+           || QString::number(p.pid).startsWith(needle);
+}
+
+bool ProcessModel::matches(const GroupInfo &g) const {
+    const QString needle = m_filter.trimmed();
+    return needle.isEmpty() || g.name.contains(needle, Qt::CaseInsensitive)
+           || g.units.join(' ').contains(needle, Qt::CaseInsensitive);
+}
+
+QList<ProcessModel::Row> ProcessModel::visible() const {
+    QList<Row> rows;
+    const bool filtering = !m_filter.trimmed().isEmpty();
+    auto byColumn = [this](const ProcessInfo &a, const ProcessInfo &b) {
+        return lessThan(a, b, m_column, m_descending);
+    };
+
+    if (!m_grouped) {
+        QList<int> order;
+        for (int i = 0; i < m_all.size(); ++i)
+            if ((m_showKernel || !m_all[i].kernel) && matches(m_all[i]))
+                order.append(i);
+        std::sort(order.begin(), order.end(), [&](int a, int b) { return byColumn(m_all[a], m_all[b]); });
+        for (int i : order)
+            rows.append({"p:" + QString::number(m_all[i].pid), false, i, 0});
+        return rows;
     }
 
-    auto key = [this](const ProcessInfo &a, const ProcessInfo &b) -> int {
-        auto cmp = [](auto x, auto y) { return x < y ? -1 : y < x ? 1 : 0; };
-        switch (m_column) {
-        case Pid: return cmp(a.pid, b.pid);
-        case Name: return a.name.compare(b.name, Qt::CaseInsensitive);
-        case User: return a.user.compare(b.user, Qt::CaseInsensitive);
-        case Cpu: return cmp(a.cpu, b.cpu);
-        case Memory: return cmp(a.memory, b.memory);
-        case Read: return cmp(a.readRate, b.readRate);
-        case Write: return cmp(a.writeRate, b.writeRate);
-        case Threads: return cmp(a.threads, b.threads);
+    QList<int> groups;
+    QHash<int, QList<int>> members; // Group index to the processes to list under it.
+    for (int g = 0; g < m_groups.size(); ++g) {
+        const GroupInfo &group = m_groups[g];
+        if (group.kind == "kernel" && !m_showKernel)
+            continue;
+        // A group shows when its name matches, with all of its processes,
+        // or when some of its processes do, with just those.
+        const bool named = matches(group);
+        QList<int> listed;
+        for (int pid : group.pids) {
+            const auto it = m_byPid.constFind(pid);
+            if (it != m_byPid.constEnd() && (named || matches(m_all[*it])))
+                listed.append(*it);
         }
-        return 0;
-    };
-    // Ties fall back to the PID, so equal rows don't shuffle on every sample.
-    std::sort(rows.begin(), rows.end(), [&](const ProcessInfo &a, const ProcessInfo &b) {
-        const int c = key(a, b);
-        if (c != 0)
-            return m_descending ? c > 0 : c < 0;
-        return a.pid < b.pid;
+        if (!named && listed.isEmpty())
+            continue;
+        groups.append(g);
+        members.insert(g, listed);
+    }
+    std::sort(groups.begin(), groups.end(), [&](int a, int b) {
+        return lessThan(m_groups[a], m_groups[b], m_column, m_descending);
     });
+    for (int g : groups) {
+        const GroupInfo &group = m_groups[g];
+        rows.append({"g:" + group.key, true, g, 0});
+        // While filtering, matching processes show without being asked for.
+        if (!m_expanded.contains(group.key) && !(filtering && !matches(group)))
+            continue;
+        QList<int> listed = members.value(g);
+        std::sort(listed.begin(), listed.end(), [&](int a, int b) { return byColumn(m_all[a], m_all[b]); });
+        for (int i : listed)
+            rows.append({"p:" + QString::number(m_all[i].pid), false, i, 1});
+    }
     return rows;
 }
 
 void ProcessModel::apply() {
-    const QList<ProcessInfo> next = visible();
+    const QList<Row> next = visible();
 
-    QSet<int> wanted;
-    for (const ProcessInfo &p : next)
-        wanted.insert(p.pid);
+    QHash<QString, int> wanted;
+    for (int i = 0; i < next.size(); ++i)
+        wanted.insert(next[i].key, i);
+
+    // The data behind the old rows has been replaced already, so point them
+    // at the new data before the view gets a chance to ask about them.
+    for (Row &row : m_rows) {
+        const auto it = wanted.constFind(row.key);
+        row.index = it == wanted.constEnd() ? -1 : next[*it].index;
+    }
 
     // Drop rows that are gone, in contiguous runs from the bottom up so the
     // indices still to be removed stay valid.
     for (int end = m_rows.size() - 1; end >= 0;) {
-        if (wanted.contains(m_rows[end].pid)) {
+        if (wanted.contains(m_rows[end].key)) {
             --end;
             continue;
         }
         int start = end;
-        while (start > 0 && !wanted.contains(m_rows[start - 1].pid))
+        while (start > 0 && !wanted.contains(m_rows[start - 1].key))
             --start;
         beginRemoveRows({}, start, end);
         m_rows.remove(start, end - start + 1);
@@ -175,13 +335,13 @@ void ProcessModel::apply() {
     }
 
     // Append newcomers; the reorder below moves them into place.
-    QSet<int> present;
-    for (const ProcessInfo &p : m_rows)
-        present.insert(p.pid);
-    QList<ProcessInfo> added;
-    for (const ProcessInfo &p : next)
-        if (!present.contains(p.pid))
-            added.append(p);
+    QSet<QString> present;
+    for (const Row &row : m_rows)
+        present.insert(row.key);
+    QList<Row> added;
+    for (const Row &row : next)
+        if (!present.contains(row.key))
+            added.append(row);
     if (!added.isEmpty()) {
         beginInsertRows({}, m_rows.size(), m_rows.size() + added.size() - 1);
         m_rows.append(added);
@@ -194,6 +354,6 @@ void ProcessModel::apply() {
     m_rows = next;
     emit layoutChanged({}, QAbstractItemModel::VerticalSortHint);
 
-    // The total behind the filter changes too, so always tell the view.
+    // The totals behind the filter change too, so always tell the view.
     emit countChanged();
 }

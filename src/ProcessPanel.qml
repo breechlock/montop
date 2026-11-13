@@ -7,14 +7,14 @@ Panel {
     id: root
 
     readonly property var model: monitor.processes
-    // Selection follows the process, not the row, so it stays put while the
-    // list re-sorts under it every sample.
-    property int selectedPid: 0
+    // Selection follows the app or process ("g:<app>", "p:<pid>"), not the
+    // row, so it stays put while the list re-sorts under it every sample.
+    property string selectedKey
     // Bumped on every sample, so bindings that ask the model re-run.
     property int tick: 0
     readonly property int selectedRow: {
         tick
-        return model.rowOf(selectedPid)
+        return model.rowOf(selectedKey)
     }
     readonly property var selected: {
         tick
@@ -29,6 +29,8 @@ Panel {
         target: root.model
         function onSortChanged() { root.tick++ }
         function onFilterChanged() { root.tick++ }
+        function onGroupedChanged() { root.tick++ }
+        function onCountChanged() { root.tick++ }
     }
     property alias filtering: filterField.activeFocus
 
@@ -36,23 +38,70 @@ Panel {
         if (model.count === 0)
             return
         row = Math.max(0, Math.min(model.count - 1, row))
-        selectedPid = model.pidAt(row)
+        selectedKey = model.keyAt(row)
         list.positionViewAtIndex(row, ListView.Contain)
     }
     function move(delta) { select((selectedRow < 0 ? -1 : selectedRow) + delta) }
     function page(direction) { move(direction * Math.max(1, Math.floor(list.height / 22) - 1)) }
+    // Apps open and close from the keyboard: right or Enter opens, left
+    // closes, and on a process left goes up to its app.
+    function expand() {
+        if (selected && selected.isGroup)
+            model.setExpanded(selected.key.slice(2), true)
+    }
+    function collapse() {
+        if (!selected)
+            return
+        if (selected.isGroup) {
+            model.setExpanded(selected.key.slice(2), false)
+            return
+        }
+        const parent = model.parentKey(selected.key)
+        if (parent.length > 0) {
+            model.setExpanded(parent.slice(2), false)
+            selectedKey = parent
+            list.positionViewAtIndex(model.rowOf(parent), ListView.Contain)
+        }
+    }
+    function toggle(key) {
+        model.setExpanded(key.slice(2), !model.isExpanded(key.slice(2)))
+    }
+    // Switching views keeps the selection on the same thing where it can.
+    function toggleGrouped() {
+        const parent = model.parentKey(selectedKey)
+        model.grouped = !model.grouped
+        if (model.rowOf(selectedKey) < 0 && parent.length > 0)
+            selectedKey = parent
+        if (selectedRow >= 0)
+            list.positionViewAtIndex(selectedRow, ListView.Contain)
+    }
+    function kindLabel(kind) {
+        switch (kind) {
+        case "app": return qsTr("app")
+        case "service": return qsTr("your service")
+        case "system": return qsTr("system service")
+        case "kernel": return qsTr("kernel threads")
+        case "session": return qsTr("login session")
+        case "process": return qsTr("process")
+        }
+        return kind
+    }
+
     function startFilter() { filterField.forceActiveFocus(); filterField.selectAll() }
     function clearFilter() { filterField.text = ""; list.forceActiveFocus() }
 
     function number(value, decimals) { return value.toLocaleString(Qt.locale(), 'f', decimals) }
 
-    title: qsTr("Processes")
+    title: model.grouped ? qsTr("Apps") : qsTr("Processes")
     key: "5"
     detail: {
         translator.language
-        return model.filter.length > 0
-            ? qsTr("%1 of %2 match").arg(model.count).arg(model.total)
-            : qsTr("%n processes", "", model.count) + "  ·  " + qsTr("%n threads", "", monitor.taskCount)
+        if (model.filter.length > 0 && !model.grouped)
+            return qsTr("%1 of %2 match").arg(model.count).arg(model.total)
+        const parts = [qsTr("%n processes", "", model.total), qsTr("%n threads", "", monitor.taskCount)]
+        if (model.grouped)
+            parts.unshift(qsTr("%n apps", "", model.groupCount))
+        return parts.join("  ·  ")
     }
 
     // Columns as [title, sort column, width, alignment]; width 0 fills.
@@ -173,6 +222,12 @@ Panel {
             delegate: Rectangle {
                 id: row
                 required property int index
+                required property string key
+                required property bool isGroup
+                required property int depth
+                required property bool expanded
+                required property int processCount
+                required property string kind
                 required property int pid
                 required property string name
                 required property string command
@@ -182,7 +237,7 @@ Panel {
                 required property real memory
                 required property real readRate
                 required property real writeRate
-                readonly property bool current: pid === root.selectedPid
+                readonly property bool current: key === root.selectedKey
 
                 width: ListView.view.width
                 height: 22
@@ -196,16 +251,54 @@ Panel {
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: root.spacing
 
-                    Label { width: root.columnWidth(0); visible: root.shown[0]; horizontalAlignment: Text.AlignRight; text: row.pid; color: row.quiet }
                     Label {
+                        width: root.columnWidth(0)
+                        visible: root.shown[0]
+                        horizontalAlignment: Text.AlignRight
+                        text: row.isGroup ? "" : row.pid
+                        color: row.quiet
+                    }
+                    // An app's name with its open/closed marker; its
+                    // processes sit indented beneath it.
+                    Item {
                         width: root.columnWidth(1)
+                        height: nameLabel.height
                         visible: root.shown[1]
-                        text: row.name
-                        color: row.current ? theme.accent : theme.colors.bright_foreground
-                        font.bold: row.current
+
+                        Label {
+                            id: marker
+                            visible: row.isGroup
+                            width: 14
+                            text: row.expanded ? "▾" : "▸"
+                            color: row.current ? theme.accent : theme.colors.dark_foreground
+
+                            MouseArea {
+                                anchors.fill: parent
+                                anchors.margins: -4
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    root.selectedKey = row.key
+                                    root.toggle(row.key)
+                                }
+                            }
+                        }
+                        Label {
+                            id: nameLabel
+                            x: row.isGroup ? marker.width : row.depth * 14
+                            width: parent.width - x
+                            text: row.name
+                            color: row.current ? theme.accent : row.isGroup || row.depth === 0 ? theme.colors.bright_foreground : theme.colors.foreground
+                            font.bold: row.current || row.isGroup
+                            elide: Text.ElideRight
+                        }
+                    }
+                    Label {
+                        width: root.columnWidth(2)
+                        visible: root.shown[2]
+                        text: row.isGroup ? root.kindLabel(row.kind) + "  ·  " + qsTr("%n processes", "", row.processCount) : row.command
+                        color: row.quiet
                         elide: Text.ElideRight
                     }
-                    Label { width: root.columnWidth(2); visible: root.shown[2]; text: row.command; color: row.quiet; elide: Text.ElideRight }
                     Label { width: root.columnWidth(3); visible: root.shown[3]; text: row.user; color: row.quiet; elide: Text.ElideRight }
                     Label { width: root.columnWidth(4); visible: root.shown[4]; horizontalAlignment: Text.AlignRight; text: row.threads; color: row.quiet }
                     Label {
@@ -236,10 +329,12 @@ Panel {
 
                 MouseArea {
                     anchors.fill: parent
+                    z: -1
                     onClicked: {
-                        root.selectedPid = row.pid
+                        root.selectedKey = row.key
                         list.forceActiveFocus()
                     }
+                    onDoubleClicked: if (row.isGroup) root.toggle(row.key)
                 }
             }
 

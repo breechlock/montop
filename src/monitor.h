@@ -4,10 +4,13 @@
 #include <QHash>
 #include <QList>
 #include <QObject>
+#include <QSet>
+#include <optional>
 #include <QTimer>
 #include <QVariantList>
 
 #include "processmodel.h"
+#include "apps.h"
 #include "procfs.h"
 
 // Samples the kernel's counters on a timer and turns them into rates,
@@ -91,6 +94,13 @@ public:
     // Sends SIGTERM, or SIGKILL when forced. Returns 0 or the errno, which
     // the window turns into a sentence.
     Q_INVOKABLE int signalProcess(int pid, bool force);
+    // The same for every process of an app. Returns how many were sent and
+    // how many failed, with the first failure's errno.
+    Q_INVOKABLE QVariantMap signalProcesses(const QVariantList &pids, bool force);
+
+    // The latest process scan, for the command line.
+    const QList<ProcessInfo> &processList() const { return m_processList; }
+    const QList<GroupInfo> &groupList() const { return m_groupList; }
 
     // Sizes in IEC units, with the decimal separator of the current language.
     Q_INVOKABLE static QString bytes(double value);
@@ -118,6 +128,8 @@ private:
     void sampleSystem();
     void sampleProcessTable();
     void sampleProcesses(double seconds, quint64 cpuTotalDelta);
+    QList<GroupInfo> groupProcesses(const QList<ProcessInfo> &processes, double seconds);
+    QString groupName(const apps::Identity &identity, const QStringList &memberNames);
     QString findTemperatureInput() const;
     QString userName(uint uid);
     void push(const QString &series, qreal value);
@@ -152,11 +164,24 @@ private:
         quint64 ticks = 0;
         procfs::PidIo io;
         bool hasIo = false;
-        QString comm, command, name;
+        QString comm, command, name, cgroup;
     };
     QHash<int, PidHistory> m_prevPids;
     QHash<uint, QString> m_users;
     ProcessModel m_processes;
     int m_taskCount = 0;
+    QList<ProcessInfo> m_processList;
+    QList<GroupInfo> m_groupList;
+    QHash<int, QString> m_cgroupOf;
+    // Cumulative counters per cgroup path, for rates between scans.
+    struct CgroupCounters {
+        quint64 cpuUsec = 0;
+        quint64 readBytes = 0, writeBytes = 0;
+        bool hasIo = false;
+    };
+    QHash<QString, CgroupCounters> m_prevCgroups;
+    QSet<QString> m_physicalDevices; // "major:minor" of the disks listed.
+    std::optional<apps::DesktopNames> m_desktopNames;
+    QHash<QString, QString> m_groupNames;
     long m_pageSize = 4096;
 };

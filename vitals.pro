@@ -5,6 +5,8 @@ TARGET = vitals
 TEMPLATE = app
 
 HEADERS += \
+    src/apps.h \
+    src/cli.h \
     src/procfs.h \
     src/monitor.h \
     src/processmodel.h \
@@ -14,6 +16,8 @@ HEADERS += \
 
 SOURCES += \
     src/main.cpp \
+    src/apps.cpp \
+    src/cli.cpp \
     src/procfs.cpp \
     src/monitor.cpp \
     src/processmodel.cpp \

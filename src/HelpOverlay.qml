@@ -19,7 +19,9 @@ Rectangle {
         ["Space", qsTr("Pause or resume updates")],
         ["+ / −", qsTr("Update less or more often")],
         ["1 – 5", qsTr("Show or hide CPU, memory, disks, network, processes")],
-        ["↑ ↓  j k", qsTr("Select a process")],
+        ["a", qsTr("Show apps or every process")],
+        ["↑ ↓  j k", qsTr("Select an app or process")],
+        ["→ ←  l h  Enter", qsTr("Open or close an app")],
         ["PgUp PgDn", qsTr("Move a page")],
         ["g  G", qsTr("First or last process")],
         ["/", qsTr("Filter processes")],
@@ -27,8 +29,8 @@ Rectangle {
         ["s", qsTr("Sort by the next column")],
         ["r", qsTr("Reverse the sort")],
         ["Shift K", qsTr("Show or hide kernel threads")],
-        ["x", qsTr("End the selected process (SIGTERM)")],
-        ["Shift X", qsTr("Kill the selected process (SIGKILL)")],
+        ["x", qsTr("End the selected app or process (SIGTERM)")],
+        ["Shift X", qsTr("Kill the selected app or process (SIGKILL)")],
         ["q", qsTr("Quit")],
     ]
 

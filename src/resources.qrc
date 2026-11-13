@@ -10,6 +10,7 @@
         <file alias="NetworkPanel.qml">NetworkPanel.qml</file>
         <file alias="ProcessPanel.qml">ProcessPanel.qml</file>
         <file alias="HelpOverlay.qml">HelpOverlay.qml</file>
+        <file alias="skill.md">skill.md</file>
         <file alias="i18n/en.json">i18n/en.json</file>
         <file alias="i18n/nl.json">i18n/nl.json</file>
     </qresource>

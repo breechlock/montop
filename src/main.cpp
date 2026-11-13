@@ -9,23 +9,33 @@
 #include <QTextStream>
 #include <QUrl>
 
+#include "cli.h"
 #include "monitor.h"
 #include "sparkline.h"
 #include "theme.h"
 #include "translator.h"
 
 int main(int argc, char *argv[]) {
-    for (int i = 1; i < argc; ++i) {
-        const QByteArray arg = argv[i];
-        if (arg == "--version" || arg == "version") {
-            QTextStream(stdout) << "vitals 0.1.0\n";
-            return 0;
-        }
+    const QByteArray first = argc > 1 ? QByteArray(argv[1]) : QByteArray();
+    if (first == "--version" || first == "version") {
+        QTextStream(stdout) << "vitals 0.2.0\n";
+        return 0;
+    }
+
+    // Bare vitals prints help, as a command line tool should; the launcher
+    // entry says vitals open. Commands need no display, so they run without
+    // a GUI application at all.
+    if (first != "open") {
+        QCoreApplication app(argc, argv);
+        app.setApplicationName("vitals");
+        app.setApplicationVersion("0.2.0");
+        const int code = runCli(app.arguments());
+        return isCliCommand(first) || first.isEmpty() ? code : 1;
     }
 
     QGuiApplication app(argc, argv);
     app.setApplicationName("vitals");
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion("0.2.0");
 
     // Matches the window to vitals.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon.

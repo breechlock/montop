@@ -1,11 +1,14 @@
 #include <QDir>
 #include <QJsonDocument>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QFile>
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "apps.h"
+#include "cli.h"
 #include "monitor.h"
 #include "processmodel.h"
 #include "procfs.h"
@@ -98,18 +101,19 @@ private slots:
     void modelSortsFiltersAndHidesKernelThreads()
     {
         ProcessModel model;
+        model.setGrouped(false);
         model.update({process(10, "zsh", 1.0), process(11, "brave", 40.0), process(12, "kworker/0:1", 0, true),
-                      process(13, "Hyprland", 5.0)});
+                      process(13, "Hyprland", 5.0)}, {});
         QCOMPARE(model.rowCount(), 3);
-        QCOMPARE(model.pidAt(0), 11); // CPU, highest first
+        QCOMPARE(model.keyAt(0), QString("p:11")); // CPU, highest first
 
         model.setSortColumn(ProcessModel::Name);
-        QCOMPARE(model.pidAt(0), 11); // brave, Hyprland, zsh: A to Z, ignoring case
-        QCOMPARE(model.pidAt(1), 13);
+        QCOMPARE(model.keyAt(0), QString("p:11")); // brave, Hyprland, zsh: A to Z, ignoring case
+        QCOMPARE(model.keyAt(1), QString("p:13"));
 
         model.setFilter("hypr");
         QCOMPARE(model.rowCount(), 1);
-        QCOMPARE(model.rowOf(13), 0);
+        QCOMPARE(model.rowOf("p:13"), 0);
 
         model.setFilter("");
         model.setShowKernelThreads(true);
@@ -119,16 +123,17 @@ private slots:
     void modelKeepsRowsAcrossUpdates()
     {
         ProcessModel model;
-        model.update({process(1, "a", 1), process(2, "b", 2)});
+        model.setGrouped(false);
+        model.update({process(1, "a", 1), process(2, "b", 2)}, {});
         QSignalSpy reset(&model, &QAbstractItemModel::modelReset);
         QSignalSpy removed(&model, &QAbstractItemModel::rowsRemoved);
         QSignalSpy inserted(&model, &QAbstractItemModel::rowsInserted);
-        model.update({process(2, "b", 0), process(3, "c", 9)});
+        model.update({process(2, "b", 0), process(3, "c", 9)}, {});
         QCOMPARE(reset.count(), 0);
         QCOMPARE(removed.count(), 1);
         QCOMPARE(inserted.count(), 1);
-        QCOMPARE(model.pidAt(0), 3);
-        QCOMPARE(model.pidAt(1), 2);
+        QCOMPARE(model.keyAt(0), QString("p:3"));
+        QCOMPARE(model.keyAt(1), QString("p:2"));
     }
 
     void monitorMeasuresFromProc()
@@ -170,12 +175,142 @@ private slots:
         QVERIFY(monitor.error().isEmpty());
 
         ProcessModel *model = monitor.processes();
+        QCOMPARE(model->rowCount(), 1); // No cgroup: the process is its own app.
+        QCOMPARE(model->keyAt(0), QString("g:process:worker"));
+        model->setGrouped(false);
         QCOMPARE(model->rowCount(), 1);
         const QVariantMap p = model->get(0);
         QCOMPARE(p.value("name").toString(), QString("worker"));
         QCOMPARE(p.value("command").toString(), QString("/usr/bin/worker --busy"));
         QCOMPARE(p.value("cpu").toDouble(), 100.0);
         QCOMPARE(p.value("readRate").toDouble(), -1.0); // No io file, so unknown.
+    }
+
+    void classifiesCgroups()
+    {
+        auto check = [](const char *path, const char *key, const char *kind, const char *id) {
+            const apps::Identity identity = apps::classify(path);
+            QCOMPARE(identity.key, QString(key));
+            QCOMPARE(identity.kind, QString(kind));
+            QCOMPARE(identity.id, QString(id));
+        };
+        const QString user = "/user.slice/user-1000.slice/user@1000.service/";
+        // Escaped dashes belong to the name; literal ones separate launcher,
+        // app, and the random suffix.
+        check(qPrintable(user + "app.slice/app-graphical.slice/app-Hyprland-xdg\\x2dterminal\\x2dexec-a7273f50.scope"),
+              "app:xdg-terminal-exec", "app", "xdg-terminal-exec");
+        check(qPrintable(user + "app.slice/app-firefox-1234.scope"), "app:firefox", "app", "firefox");
+        check(qPrintable(user + "app.slice/app-Hyprland-org.gnome.Nautilus@ab12.service"), "app:org.gnome.Nautilus", "app",
+              "org.gnome.Nautilus");
+        check(qPrintable(user + "app.slice/superwhisper.service"), "service:superwhisper", "service", "superwhisper");
+        check(qPrintable(user + "session.slice/wayland-wm@hyprland.desktop.service"),
+              "service:wayland-wm@hyprland.desktop", "service", "wayland-wm@hyprland.desktop");
+        check("/system.slice/NetworkManager.service", "system:NetworkManager", "system", "NetworkManager");
+        check("/init.scope", "system:systemd", "system", "systemd");
+        check("/user.slice/user-1000.slice/session-1.scope", "session", "session", "session");
+        check("/", "kernel", "kernel", "kernel");
+        QCOMPARE(apps::unescape("a\\x2db\\x40c"), QString("a-b@c"));
+    }
+
+    void readsDesktopNames()
+    {
+        QTemporaryDir user, system;
+        write(user.filePath("foot.desktop"), "[Desktop Entry]\nName=My Foot\n");
+        write(system.filePath("foot.desktop"), "[Desktop Entry]\nName=Foot\n");
+        write(system.filePath("sub/org.gnome.Nautilus.desktop"),
+              "[Desktop Action new]\nName=New Window\n[Desktop Entry]\nName=Files\nName[nl]=Bestanden\n");
+        apps::DesktopNames names({user.path(), system.path()});
+        QCOMPARE(names.name("foot"), QString("My Foot")); // The user's own entry wins.
+        QCOMPARE(names.name("org.gnome.nautilus"), QString("Files"));
+        QVERIFY(names.name("missing").isEmpty());
+    }
+
+    void modelGroupsAndExpands()
+    {
+        ProcessModel model;
+        QList<ProcessInfo> processes{process(10, "brave", 30), process(11, "brave", 10), process(20, "foot", 1),
+                                     process(21, "make", 50), process(2, "kthreadd", 0, true)};
+        for (int i : {0, 1})
+            processes[i].group = "app:brave";
+        for (int i : {2, 3})
+            processes[i].group = "app:foot";
+        processes[4].group = "kernel";
+        QList<GroupInfo> groups{group("app:brave", "Brave", {10, 11}, 40), group("app:foot", "Foot", {20, 21}, 51),
+                                group("kernel", "Kernel", {2}, 0, "kernel")};
+        model.update(processes, groups);
+
+        // Apps only, busiest first, and no kernel until asked.
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(model.keyAt(0), QString("g:app:foot"));
+        QCOMPARE(model.groupCount(), 2);
+
+        model.setExpanded("app:foot", true);
+        QCOMPARE(model.rowCount(), 4);
+        QCOMPARE(model.keyAt(1), QString("p:21")); // make, the busier one, first
+        QCOMPARE(model.data(model.index(1), ProcessModel::DepthRole).toInt(), 1);
+        QCOMPARE(model.parentKey("p:21"), QString("g:app:foot"));
+
+        // A filter that matches a process shows it under its app, opened.
+        model.setExpanded("app:foot", false);
+        model.setFilter("brave");
+        QCOMPARE(model.rowCount(), 1); // The app's own name matched: it stays closed.
+        model.setFilter("make");
+        QCOMPARE(model.rowCount(), 2);
+        QCOMPARE(model.keyAt(1), QString("p:21"));
+
+        model.setFilter("");
+        model.setGrouped(false);
+        QCOMPARE(model.rowCount(), 4);
+        QCOMPARE(model.keyAt(0), QString("p:21"));
+    }
+
+    void monitorGroupsByCgroup()
+    {
+        QTemporaryDir root;
+        const QString proc = root.filePath("proc"), sys = root.filePath("sys");
+        const QString scope = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-Hyprland-testapp-1a2b.scope";
+        write(proc + "/meminfo", "MemTotal: 1000 kB\nMemAvailable: 600 kB\n");
+        write(proc + "/stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n");
+        write(sys + "/block/sda/size", "1000\n");
+        write(sys + "/block/sda/dev", "8:0\n");
+        write(proc + "/diskstats", "8 0 sda 0 0 0 0 0 0 0 0 0 0 0\n");
+        for (int pid : {100, 101}) {
+            write(proc + QString("/%1/stat").arg(pid), pidStat(pid, "testapp", 0));
+            write(proc + QString("/%1/cgroup").arg(pid), "0::" + scope.toUtf8() + "\n");
+        }
+        write(sys + "/fs/cgroup" + scope + "/cpu.stat", "usage_usec 1000000\n");
+        write(sys + "/fs/cgroup" + scope + "/memory.stat", "anon 4096\nfile 999999\nshmem 1024\nkernel 1024\n");
+        write(sys + "/fs/cgroup" + scope + "/io.stat", "8:0 rbytes=0 wbytes=0\n253:0 rbytes=0 wbytes=0\n");
+        Monitor monitor(proc, sys);
+
+        // Half a second of CPU over about a tenth of a second would be far
+        // more than the processes' own (zero) ticks: the cgroup counts
+        // children that already exited.
+        write(sys + "/fs/cgroup" + scope + "/cpu.stat", "usage_usec 1050000\n");
+        write(sys + "/fs/cgroup" + scope + "/io.stat", "8:0 rbytes=1048576 wbytes=0\n253:0 rbytes=1048576 wbytes=0\n");
+        write(proc + "/stat", "cpu  10 0 0 10 0 0 0 0\ncpu0 10 0 0 10 0 0 0 0\n");
+        QTest::qWait(100);
+        monitor.sample();
+
+        QCOMPARE(monitor.groupList().size(), 1);
+        const GroupInfo g = monitor.groupList().first();
+        QCOMPARE(g.key, QString("app:testapp"));
+        QCOMPARE(g.kind, QString("app"));
+        QCOMPARE(g.pids.size(), 2);
+        QCOMPARE(g.memory, quint64(6144)); // anon + shmem + kernel, not the page cache
+        QVERIFY(g.cpu > 20);
+        // Only the physical disk counts, not the volume stacked on it.
+        QVERIFY(g.readRate > 0 && g.readRate < 1048576 * 20);
+
+        const QJsonObject snapshot = snapshotJson(monitor, 5, "cpu");
+        QCOMPARE(snapshot["apps"].toArray().size(), 1);
+        const QJsonObject app = snapshot["apps"].toArray().first().toObject();
+        QCOMPARE(app["processes"].toInt(), 2);
+        QCOMPARE(app["kind"].toString(), QString("app"));
+        QCOMPARE(app["top_processes"].toArray().size(), 2);
+        QCOMPARE(snapshot["processes"].toArray().first().toObject()["app"].toString(), g.name);
+        QVERIFY(snapshot["memory"].toObject()["total_bytes"].toDouble() > 0);
+        QVERIFY(snapshot["cpu"].toObject()["temperature_celsius"].isNull());
     }
 
     void monitorSaysWhenProcIsMissing()
@@ -296,6 +431,18 @@ private:
         p.cpu = cpu;
         p.kernel = kernel;
         return p;
+    }
+
+    static GroupInfo group(const QString &key, const QString &name, const QList<int> &pids, double cpu,
+                           const QString &kind = "app")
+    {
+        GroupInfo g;
+        g.key = key;
+        g.name = name;
+        g.kind = kind;
+        g.pids = pids;
+        g.cpu = cpu;
+        return g;
     }
 
     static QByteArray pidStat(int pid, const char *comm, int ticks)

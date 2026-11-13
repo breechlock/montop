@@ -1,4 +1,30 @@
 {
-  "%n processes": { "one": "%n process", "other": "%n processes" },
-  "%n threads": { "one": "%n thread", "other": "%n threads" }
+  "%n processes": {
+    "one": "%n process",
+    "other": "%n processes"
+  },
+  "%n threads": {
+    "one": "%n thread",
+    "other": "%n threads"
+  },
+  "%n apps": {
+    "one": "%n app",
+    "other": "%n apps"
+  },
+  "End %1 and its %n processes?": {
+    "one": "End %1 and its %n process?",
+    "other": "End %1 and its %n processes?"
+  },
+  "Kill %1 and its %n processes?": {
+    "one": "Kill %1 and its %n process?",
+    "other": "Kill %1 and its %n processes?"
+  },
+  "Couldn't signal %n of %1's processes, error %2": {
+    "one": "Couldn't signal %n of %1's processes, error %2",
+    "other": "Couldn't signal %n of %1's processes, error %2"
+  },
+  "Not allowed to signal %n of %1's processes: they belong to another user": {
+    "one": "Not allowed to signal %n of %1's processes: it belongs to another user",
+    "other": "Not allowed to signal %n of %1's processes: they belong to another user"
+  }
 }

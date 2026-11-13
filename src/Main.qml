@@ -73,6 +73,8 @@ ApplicationWindow {
             return
         confirm.pid = p.pid
         confirm.name = p.name
+        confirm.pids = p.isGroup ? p.pids : []
+        confirm.kind = p.isGroup ? p.kind : ""
         confirm.force = force
         confirm.open()
     }
@@ -118,6 +120,9 @@ ApplicationWindow {
             win.say(monitor.processes.showKernelThreads ? qsTr("Showing kernel threads") : qsTr("Hiding kernel threads"))
         }
     }
+    Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.toggleGrouped() }
+    Shortcut { sequences: ["Right", "L", "Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.expand() }
+    Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.collapse() }
     Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToEnd(false) }
     Shortcut { sequence: "Shift+X"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToEnd(true) }
     Shortcut {
@@ -237,7 +242,9 @@ ApplicationWindow {
                 Label {
                     Layout.fillWidth: true
                     text: win.message.length > 0 ? win.message
-                        : processes.selected ? processes.selected.pid + "  " + processes.selected.command : ""
+                        : !processes.selected ? ""
+                        : processes.selected.isGroup ? processes.selected.name + "  ·  " + processes.selected.command
+                        : processes.selected.pid + "  " + processes.selected.command
                     color: win.message.length > 0 ? (win.messageIsError ? theme.colors.red : theme.accent) : theme.colors.dark_foreground
                     elide: Text.ElideRight
                 }
@@ -261,6 +268,13 @@ ApplicationWindow {
         property int pid
         property string name
         property bool force
+        // Every process of an app, when the selection is an app.
+        property var pids: []
+        property string kind
+        readonly property bool group: pids.length > 0
+        // Services and the session are not apps people opened; ending one can
+        // take the desktop with it (the compositor is a service, too).
+        readonly property bool critical: group && (kind === "service" || kind === "system" || kind === "session")
 
         anchors.centerIn: parent
         modal: true
@@ -279,6 +293,17 @@ ApplicationWindow {
         }
 
         function accept() {
+            if (group) {
+                const result = monitor.signalProcesses(pids, force)
+                close()
+                if (result.failed === 0)
+                    win.say(force ? qsTr("Killed %1").arg(name) : qsTr("Asked %1 to end").arg(name))
+                else if (result.error === 1)
+                    win.say(qsTr("Not allowed to signal %n of %1's processes: they belong to another user", "", result.failed).arg(name), true)
+                else
+                    win.say(qsTr("Couldn't signal %n of %1's processes, error %2", "", result.failed).arg(name).arg(result.error), true)
+                return
+            }
             const error = monitor.signalProcess(pid, force)
             close()
             if (error === 0)
@@ -297,8 +322,11 @@ ApplicationWindow {
             Keys.onEnterPressed: confirm.accept()
 
             Label {
-                text: confirm.force ? qsTr("Kill %1 (%2)?").arg(confirm.name).arg(confirm.pid)
-                                    : qsTr("End %1 (%2)?").arg(confirm.name).arg(confirm.pid)
+                text: confirm.group
+                    ? (confirm.force ? qsTr("Kill %1 and its %n processes?", "", confirm.pids.length).arg(confirm.name)
+                                     : qsTr("End %1 and its %n processes?", "", confirm.pids.length).arg(confirm.name))
+                    : (confirm.force ? qsTr("Kill %1 (%2)?").arg(confirm.name).arg(confirm.pid)
+                                     : qsTr("End %1 (%2)?").arg(confirm.name).arg(confirm.pid))
                 color: theme.colors.bright_foreground
                 font.bold: true
                 font.pixelSize: 15
@@ -310,6 +338,13 @@ ApplicationWindow {
                     ? qsTr("SIGKILL stops it immediately. Unsaved work in it is lost.")
                     : qsTr("SIGTERM asks it to close, so it can save and clean up first.")
                 color: theme.colors.foreground
+            }
+            Label {
+                visible: confirm.critical
+                Layout.maximumWidth: 420
+                wrapMode: Text.Wrap
+                text: qsTr("%1 is part of your system, not an app you opened. Ending it can close your session or break what depends on it.").arg(confirm.name)
+                color: theme.colors.red
             }
             RowLayout {
                 Layout.alignment: Qt.AlignRight

@@ -1,6 +1,7 @@
 #include "monitor.h"
 
 #include <QDir>
+#include <QMap>
 #include <QFileInfo>
 #include <QLocale>
 #include <QSysInfo>
@@ -86,6 +87,21 @@ void Monitor::setPaused(bool paused) {
         m_timer.start();
     }
     emit pausedChanged();
+}
+
+QVariantMap Monitor::signalProcesses(const QVariantList &pids, bool force) {
+    int sent = 0, failed = 0, error = 0;
+    for (const QVariant &pid : pids) {
+        const int result = signalProcess(pid.toInt(), force);
+        if (result == 0) {
+            ++sent;
+        } else if (result != ESRCH) { // Already gone is as good as ended.
+            ++failed;
+            if (!error)
+                error = result;
+        }
+    }
+    return {{"sent", sent}, {"failed", failed}, {"error", error}};
 }
 
 int Monitor::signalProcess(int pid, bool force) {
@@ -252,6 +268,7 @@ void Monitor::sampleDisks(double seconds) {
 
     QVariantList disks;
     QHash<QString, DiskCounters> previous;
+    QSet<QString> physical;
     for (const QString &name : devices) {
         if (name.startsWith("loop") || name.startsWith("ram") || name.startsWith("zram") || name.startsWith("dm-")
             || !counters.contains(name))
@@ -260,6 +277,7 @@ void Monitor::sampleDisks(double seconds) {
             continue;
         const DiskCounters now = counters.value(name);
         previous.insert(name, now);
+        physical.insert(readLine(block.filePath(name + "/dev")));
         double readRate = 0, writeRate = 0, busy = 0;
         if (seconds > 0 && m_prevDisks.contains(name)) {
             const DiskCounters before = m_prevDisks.value(name);
@@ -280,6 +298,7 @@ void Monitor::sampleDisks(double seconds) {
         });
     }
     m_prevDisks = previous;
+    m_physicalDevices = physical;
     m_disks = disks;
 }
 
@@ -362,6 +381,7 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
 
     QList<ProcessInfo> processes;
     QHash<int, PidHistory> seen;
+    m_cgroupOf.clear();
     int tasks = 0;
     while (dirent *entry = readdir(dir)) {
         if (entry->d_name[0] < '1' || entry->d_name[0] > '9')
@@ -402,6 +422,23 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
             const QString argv0 = QFileInfo(history.command.section(' ', 0, 0)).fileName();
             history.name = !argv0.isEmpty() && argv0.startsWith(stat.comm) ? argv0 : stat.comm;
         }
+        // Which app it belongs to. Processes rarely change cgroup after
+        // they start, so this is read once per process too.
+        if (known) {
+            history.cgroup = before->cgroup;
+        } else {
+            for (const QByteArray &line : readFile(base + "/cgroup", 4096).split('\n'))
+                if (line.startsWith("0::"))
+                    history.cgroup = QString::fromUtf8(line.mid(3)).trimmed();
+        }
+        m_cgroupOf.insert(p.pid, history.cgroup);
+        // Without a readable cgroup (or with cgroups v1), a process is its
+        // own app; only kernel threads go in the kernel's group.
+        const apps::Identity identity = apps::classify(history.cgroup);
+        p.group = p.kernel ? QString("kernel")
+                  : history.cgroup.isEmpty() || identity.kind == "kernel" ? "process:" + stat.comm
+                                                                          : identity.key;
+
         p.name = history.name;
         p.command = history.command.isEmpty() ? '[' + stat.comm + ']' : history.command;
 
@@ -423,5 +460,168 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
 
     m_prevPids = seen;
     m_taskCount = tasks;
-    m_processes.update(processes);
+    m_processList = processes;
+    m_groupList = groupProcesses(processes, seconds);
+    m_processes.update(m_processList, m_groupList);
+}
+
+// The name people know an app by: its desktop entry's, else its own.
+QString Monitor::groupName(const apps::Identity &identity, const QStringList &memberNames) {
+    if (identity.kind == "kernel")
+        return tr("Kernel");
+    if (identity.kind == "session")
+        return tr("Login session");
+    if (!m_desktopNames)
+        m_desktopNames.emplace();
+    QString name;
+    if (identity.kind == "app" || identity.kind == "service") {
+        name = m_desktopNames->name(identity.id);
+        // A template instance named after a desktop entry, like uwsm's
+        // wayland-wm@hyprland.desktop for the compositor itself.
+        const QString instance = identity.id.section('@', 1);
+        if (name.isEmpty() && instance.endsWith(".desktop"))
+            name = m_desktopNames->name(instance.chopped(8));
+        // Launchers like xdg-terminal-exec name the scope after themselves;
+        // what runs in it is the app: the first process, oldest first, that
+        // has a desktop entry of its own (the terminal, not the shell in it).
+        for (const QString &member : memberNames) {
+            if (!name.isEmpty() || identity.kind != "app")
+                break;
+            name = m_desktopNames->name(member);
+        }
+    }
+    return name.isEmpty() ? identity.id : name;
+}
+
+QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, double seconds) {
+    struct Acc {
+        GroupInfo group;
+        QStringList cgroups;
+        int leaderPid = 0;
+        QMap<int, QString> names; // By PID, so oldest first.
+        double readSum = 0, writeSum = 0;
+        bool readKnown = false, writeKnown = false;
+        // Per cgroup, the members' own sums, for cgroups without counters.
+        QHash<QString, double> cpuByCgroup;
+        QHash<QString, quint64> memoryByCgroup;
+    };
+    QHash<QString, Acc> groups;
+    QHash<QString, apps::Identity> identities;
+
+    for (const ProcessInfo &p : processes) {
+        const QString cgroup = p.kernel ? QString("/") : m_cgroupOf.value(p.pid);
+        Acc &acc = groups[p.group];
+        if (acc.group.key.isEmpty()) {
+            acc.group.key = p.group;
+            identities.insert(p.group, p.group.startsWith("process:")
+                                           ? apps::Identity{p.group, p.name, "process", {}}
+                                           : apps::classify(cgroup));
+        }
+        acc.group.pids.append(p.pid);
+        acc.group.threads += p.threads;
+        if (!acc.cgroups.contains(cgroup))
+            acc.cgroups.append(cgroup);
+        acc.cpuByCgroup[cgroup] += p.cpu;
+        acc.memoryByCgroup[cgroup] += p.memory;
+        if (p.readRate >= 0) { acc.readSum += p.readRate; acc.readKnown = true; }
+        if (p.writeRate >= 0) { acc.writeSum += p.writeRate; acc.writeKnown = true; }
+        acc.names.insert(p.pid, p.name);
+        if (acc.leaderPid == 0 || p.pid < acc.leaderPid) {
+            acc.leaderPid = p.pid;
+            acc.group.user = p.user;
+        }
+        const QString unit = apps::unescape(apps::classify(cgroup).unit);
+        if (!unit.isEmpty() && !acc.group.units.contains(unit))
+            acc.group.units.append(unit);
+    }
+
+    // The cgroup's own counters are exact where the members' sums are not:
+    // they include children that already exited (a build's compilers) and
+    // count shared memory once. Read them where the kernel offers them.
+    const QString root = m_sys + "/fs/cgroup";
+    QHash<QString, CgroupCounters> current;
+    QList<GroupInfo> result;
+    for (auto it = groups.begin(); it != groups.end(); ++it) {
+        Acc &acc = it.value();
+        GroupInfo &g = acc.group;
+        const apps::Identity identity = identities.value(g.key);
+        g.kind = identity.kind;
+        if (!m_groupNames.contains(g.key))
+            m_groupNames.insert(g.key, groupName(identity, acc.names.values()));
+        g.name = m_groupNames.value(g.key);
+
+        double cpu = 0, read = 0, write = 0;
+        quint64 memory = 0;
+        bool ioKnown = true;
+        for (const QString &cgroup : acc.cgroups) {
+            // The root cgroup's counters are the whole system's.
+            const QByteArray cpuStat = cgroup.isEmpty() || cgroup == "/" ? QByteArray()
+                                                                          : readFile(root + cgroup + "/cpu.stat", 4096);
+            if (cpuStat.isEmpty()) {
+                cpu += acc.cpuByCgroup.value(cgroup);
+                memory += acc.memoryByCgroup.value(cgroup);
+                ioKnown = false;
+                continue;
+            }
+            CgroupCounters now;
+            for (const QByteArray &line : cpuStat.split('\n'))
+                if (line.startsWith("usage_usec "))
+                    now.cpuUsec = line.mid(11).toULongLong();
+
+            // Memory the app itself holds: anonymous, shared, and kernel
+            // memory, but not the page cache, which the kernel hands back.
+            quint64 held = 0;
+            for (const QByteArray &line : readFile(root + cgroup + "/memory.stat", 16384).split('\n')) {
+                const QList<QByteArray> field = line.split(' ');
+                if (field.size() == 2 && (field[0] == "anon" || field[0] == "shmem" || field[0] == "kernel"))
+                    held += field[1].toULongLong();
+            }
+            memory += held > 0 ? held : acc.memoryByCgroup.value(cgroup);
+
+            // Only whole physical disks: a disk and the encrypted volume on
+            // top of it both list the same bytes.
+            const QByteArray io = readFile(root + cgroup + "/io.stat", 16384);
+            now.hasIo = !io.isNull();
+            for (const QByteArray &line : io.split('\n')) {
+                const QList<QByteArray> fields = line.split(' ');
+                if (fields.isEmpty() || !m_physicalDevices.contains(QString::fromLatin1(fields[0])))
+                    continue;
+                for (const QByteArray &field : fields) {
+                    if (field.startsWith("rbytes="))
+                        now.readBytes += field.mid(7).toULongLong();
+                    else if (field.startsWith("wbytes="))
+                        now.writeBytes += field.mid(7).toULongLong();
+                }
+            }
+            current.insert(cgroup, now);
+
+            const auto before = m_prevCgroups.constFind(cgroup);
+            if (before != m_prevCgroups.constEnd() && seconds > 0) {
+                cpu += 100.0 * double(now.cpuUsec - std::min(now.cpuUsec, before->cpuUsec)) / (seconds * 1e6);
+                if (now.hasIo && before->hasIo) {
+                    read += (now.readBytes - std::min(now.readBytes, before->readBytes)) / seconds;
+                    write += (now.writeBytes - std::min(now.writeBytes, before->writeBytes)) / seconds;
+                } else {
+                    ioKnown = false;
+                }
+            } else {
+                // A cgroup seen for the first time has no previous reading.
+                cpu += acc.cpuByCgroup.value(cgroup);
+                ioKnown = false;
+            }
+        }
+        g.cpu = cpu;
+        g.memory = memory;
+        g.memoryShare = m_memTotal > 0 ? memory / m_memTotal : 0;
+        if (ioKnown) {
+            g.readRate = read;
+            g.writeRate = write;
+        } else {
+            g.readRate = acc.readKnown ? acc.readSum : -1;
+            g.writeRate = acc.writeKnown ? acc.writeSum : -1;
+        }
+        result.append(g);
+    }
+    m_prevCgroups = current;
+    return result;
 }
