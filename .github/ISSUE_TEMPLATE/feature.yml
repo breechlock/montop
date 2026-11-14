@@ -1,0 +1,17 @@
+name: Idea
+description: Suggest something Vitals could do, or do better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to find out or do?
+      description: The question about your system, or the task, that Vitals doesn't help with yet.
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you picture it, if you have an idea. Vitals stays one keyboard-driven window, so say which key or command you'd expect.

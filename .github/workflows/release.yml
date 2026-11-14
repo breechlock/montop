@@ -1,0 +1,43 @@
+name: Release
+
+# On a version tag: checks the tag matches the version in vitals.pro and the
+# PKGBUILDs, builds and tests the tagged code in omarchy-pkgs' builder, and
+# publishes the GitHub release with the package attached, unless a release
+# for the tag already exists. Omarchy's repository picks the release up on
+# its own once Vitals is in it.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the tag matches the version
+        run: |
+          version=$(sed -n 's/^VERSION = //p' vitals.pro)
+          [[ "${GITHUB_REF_NAME}" == "v$version" ]] || { echo "::error::Tag $GITHUB_REF_NAME, but vitals.pro says $version"; exit 1; }
+
+      - name: Install bsdtar
+        run: sudo apt-get update -q && sudo apt-get install -yq libarchive-tools
+
+      - name: Build and check the package (rootless Podman)
+        run: bin/package-check
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          package=$(ls build/omarchy-pkgs/build-output/edge/x86_64/vitals-*-x86_64.pkg.tar.zst)
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$package" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$package" --verify-tag \
+              --title "Vitals ${GITHUB_REF_NAME#v}" --generate-notes
+          fi

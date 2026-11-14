@@ -62,13 +62,26 @@ PKGBUILDs; `bin/package-check` refuses a mismatch.
 
 1. Set the version in the three places; reset `pkgrel=1`. Update README if
    behaviour changed. `bin/test`, `bin/package-check`. Commit.
-2. Push, then `git tag -a vX.Y.Z -m "Vitals X.Y.Z"`, push the tag, and
-   `gh release create vX.Y.Z --verify-tag` with short notes.
+2. Push, then `git tag -a vX.Y.Z -m "Vitals X.Y.Z"` and push the tag. The
+   Release workflow checks the tag against `vitals.pro`, builds and tests it
+   in omarchy-pkgs' builder, and publishes the release with generated notes
+   and the x86_64 package attached. Rewrite the notes in plain words with
+   `gh release edit vX.Y.Z --notes-file ...`.
 3. In `pkgbuild/omarchy-pkgs/`, run `updpkgsums` (delete the downloaded
    tarball afterwards), then `bin/package-check --release` to build exactly
    what will ship. Commit the new checksum.
 4. Once Vitals is in omarchy-pkgs, its `upstream.watch` picks up the GitHub
    release on its own and a bot opens the update PR; nothing else is needed.
+
+## GitHub
+
+- Workflows: Test (build and tests in `archlinux:latest`, on every push and
+  PR), Package (`bin/package-check` on ubuntu-latest's rootless Podman, when
+  packaging or the build changes), Release (on `v*` tags). Dependabot keeps
+  the pinned actions current.
+- Issue forms in `.github/ISSUE_TEMPLATE` (bug, idea; no blank issues),
+  `pull_request_template.md`, and `SECURITY.md` (private advisories).
+- The default branch is `main`.
 
 ## omarchy-pkgs compliance
 

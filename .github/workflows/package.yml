@@ -1,0 +1,38 @@
+name: Package
+
+# Builds Vitals in omarchy-pkgs' own builder, the way that repository's CI
+# will, whenever the packaging or the build changes.
+on:
+  pull_request:
+    paths:
+      - 'pkgbuild/**'
+      - 'bin/**'
+      - 'vitals.pro'
+      - 'src/skill.md'
+      - '.github/workflows/package.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pkgbuild/**'
+      - 'bin/**'
+      - 'vitals.pro'
+      - 'src/skill.md'
+      - '.github/workflows/package.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Build in omarchy-pkgs' builder
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install bsdtar
+        run: sudo apt-get update -q && sudo apt-get install -yq libarchive-tools
+
+      - name: Build and check the package (rootless Podman)
+        run: bin/package-check

@@ -1,0 +1,45 @@
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    # Vitals ships as an Arch package built against Arch's Qt, so it's tested there.
+    container: archlinux:latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install git for the checkout
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the package's dependencies
+        # The omarchy-pkgs recipe is the one list of what Vitals needs.
+        run: |
+          source pkgbuild/omarchy-pkgs/PKGBUILD
+          deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
+          pacman -S --noconfirm --needed base-devel "${deps[@]%%[<>=]*}"
+
+      - name: Set up an ordinary user and a locale like a desktop's
+        # Root reads every process's files, so tests run as a user, as Vitals does.
+        run: |
+          useradd -m tester
+          chown -R tester .
+          sed -i 's/^#en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen
+          locale-gen
+
+      - name: Build
+        run: su tester -c bin/build
+
+      - name: Test
+        run: su tester -c 'LANG=en_US.UTF-8 bin/test'

@@ -1,0 +1,38 @@
+name: Bug
+description: Something in Vitals is wrong, broken, or misleading
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Vitals version
+      description: The output of `vitals --version`
+      placeholder: vitals 0.3.1
+    validations:
+      required: true
+
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Omarchy version (`omarchy-version`), or your distribution, and the CPU and GPU
+      placeholder: e.g. Omarchy 4.5.0, AMD Ryzen 7 7840U, Radeon 780M
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What's wrong?
+      description: What you did, what you expected, and what Vitals did instead. A screenshot helps for anything on screen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: output
+    attributes:
+      label: Command output
+      description: |
+        If a command misbehaves, its output, or for wrong numbers `vitals snapshot --json`.
+        These list your processes, command lines, and user name: remove anything you'd rather not share.
+      render: text
