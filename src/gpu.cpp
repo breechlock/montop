@@ -160,6 +160,9 @@ QHash<QString, double> engineShares(const Client &before, const Client &now, dou
 class RealNvml : public Nvml {
     struct Utilization { unsigned gpu, memory; };
     struct Memory { unsigned long long total, free, used; };
+    // The newer call, which leaves the driver's reserved memory out of
+    // "used", as nvidia-smi does.
+    struct Memory2 { unsigned version; unsigned long long total, reserved, free, used; };
     struct ProcessInfo { unsigned pid; unsigned long long usedGpuMemory; unsigned gpuInstanceId, computeInstanceId; };
     struct Sample { unsigned pid; unsigned long long timeStamp; unsigned smUtil, memUtil, encUtil, decUtil; };
     using Handle = void *;
@@ -171,6 +174,7 @@ class RealNvml : public Nvml {
     int (*m_name)(Handle, char *, unsigned) = nullptr;
     int (*m_utilization)(Handle, Utilization *) = nullptr;
     int (*m_memory)(Handle, Memory *) = nullptr;
+    int (*m_memory2)(Handle, Memory2 *) = nullptr;
     int (*m_temperature)(Handle, int, unsigned *) = nullptr;
     int (*m_power)(Handle, unsigned *) = nullptr;
     int (*m_clock)(Handle, int, unsigned *) = nullptr;
@@ -222,6 +226,7 @@ public:
             m_library = nullptr;
             return false;
         }
+        resolve(m_memory2, "nvmlDeviceGetMemoryInfo_v2"); // Optional: older drivers lack it.
         return true;
     }
     ~RealNvml() override {
@@ -244,6 +249,13 @@ public:
         return m_utilization(device, &u) == Success ? u.gpu / 100.0 : -1;
     }
     bool memory(void *device, double &used, double &total) override {
+        Memory2 m2{};
+        m2.version = unsigned(sizeof(Memory2)) | (2u << 24);
+        if (m_memory2 && m_memory2(device, &m2) == Success) {
+            used = double(m2.used);
+            total = double(m2.total);
+            return true;
+        }
         Memory m{};
         if (m_memory(device, &m) != Success)
             return false;
