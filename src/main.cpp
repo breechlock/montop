@@ -70,5 +70,9 @@ int main(int argc, char *argv[]) {
     if (engine.rootObjects().isEmpty())
         return 1;
 
-    return app.exec();
+    const int code = app.exec();
+    // Apps paused from the window resume when it closes: a frozen app with
+    // nothing on screen saying so would just look hung.
+    monitor.undoControls();
+    return code;
 }

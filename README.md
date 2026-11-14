@@ -14,6 +14,10 @@ bpytop, and btop.
   to that terminal. Open an app to see its processes, or press `a` for the
   classic flat process list. Sort, filter, and end or kill an app or a process
   from the keyboard.
+- **Pause or slow down an app** instead of killing it: `p` freezes every
+  process in the app until you press `p` again, and `c` caps how much CPU it
+  may use. Your work stays where it was. Both undo themselves when Vitals
+  closes.
 
 Vitals follows the current Omarchy theme live, the whole palette, light or dark,
 along with Hyprland's window rounding, the desktop's monospace font, and the
@@ -37,6 +41,8 @@ language picked under Setup > Language.
 | `s` | Sort by the next column (or click a column header) |
 | `r` | Reverse the sort |
 | `Shift K` | Show or hide kernel threads |
+| `p` | Pause or resume the selected app |
+| `c` | Limit the selected app's CPU |
 | `x` | End the selected app or process (SIGTERM), after asking |
 | `Shift X` | Kill the selected app or process (SIGKILL), after asking |
 | `q` | Quit |
@@ -58,12 +64,24 @@ Those are exact where adding up processes is not: they include child processes
 that already exited (a build's compilers), count shared memory once, and leave
 out the page cache. Processes without a cgroup Vitals can read stand alone.
 
+## Pausing and limiting
+
+Pausing freezes the app's cgroup and limiting sets its `CPUQuota`, both through
+systemd's user manager (`systemctl --user freeze` and `set-property --runtime`),
+so no root is needed and systemd stays in charge. Vitals acts only on your apps
+(`app.slice`) and background services (`background.slice`). It refuses the
+desktop's own services in `session.slice` (the compositor, D-Bus, audio,
+portals), which would freeze the session, system services, which need root,
+and the app Vitals itself runs in, such as the terminal you started it from.
+
 ## For scripts and agents
 
 ```sh
 vitals snapshot            # CPU, memory, disks, network, busiest apps and processes
 vitals snapshot --json --sort memory --top 20
 vitals apps --json         # every app and service, with its PIDs and top processes
+vitals pause brave         # freeze an app until: vitals resume brave
+vitals limit brave 200     # cap it at two cores until logout; vitals limit brave off
 vitals skill install       # teach Claude Code and Codex to use Vitals
 ```
 

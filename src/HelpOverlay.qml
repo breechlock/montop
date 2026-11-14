@@ -29,6 +29,8 @@ Rectangle {
         ["s", qsTr("Sort by the next column")],
         ["r", qsTr("Reverse the sort")],
         ["Shift K", qsTr("Show or hide kernel threads")],
+        ["p", qsTr("Pause or resume the selected app")],
+        ["c", qsTr("Limit the selected app's CPU")],
         ["x", qsTr("End the selected app or process (SIGTERM)")],
         ["Shift X", qsTr("Kill the selected app or process (SIGKILL)")],
         ["q", qsTr("Quit")],

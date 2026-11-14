@@ -93,6 +93,8 @@ QJsonObject appJson(const GroupInfo &g, const QHash<int, ProcessInfo> &byPid, co
         {"cpu_percent", round1(g.cpu)}, {"memory_bytes", double(g.memory)},
         {"read_bytes_per_second", rateJson(g.readRate)}, {"write_bytes_per_second", rateJson(g.writeRate)},
         {"pids", pids}, {"top_processes", top},
+        {"paused", g.frozen}, {"cpu_limit_percent", g.cpuLimit > 0 ? QJsonValue(round1(g.cpuLimit)) : QJsonValue()},
+        {"controllable", g.control.isEmpty()},
     };
 }
 
@@ -228,6 +230,88 @@ int snapshot(const QStringList &arguments) {
     return 0;
 }
 
+// The app a person or agent means: its key, its name, a unit, or the PID of
+// any of its processes. A name that fits several is an error, not a guess.
+const GroupInfo *findApp(const Monitor &monitor, const QString &query, QString &error) {
+    const QList<GroupInfo> &groups = monitor.groupList();
+    bool isPid = false;
+    const int pid = query.toInt(&isPid);
+    QList<const GroupInfo *> found;
+    for (const GroupInfo &g : groups) {
+        if (g.key == query)
+            return &g;
+        if (isPid ? g.pids.contains(pid)
+                  : g.name.compare(query, Qt::CaseInsensitive) == 0 || g.units.contains(query)
+                        || g.controlUnits.contains(query))
+            found.append(&g);
+    }
+    if (found.size() == 1)
+        return found.first();
+    if (found.isEmpty()) {
+        error = "No app called " + query + ". vitals apps lists them.";
+    } else {
+        QStringList keys;
+        for (const GroupInfo *g : found)
+            keys << g->key;
+        error = query + " could be " + keys.join(", ") + ". Use one of those keys.";
+    }
+    return nullptr;
+}
+
+QJsonObject controlJson(const GroupInfo &g) {
+    return {{"name", g.name}, {"key", g.key}, {"units", QJsonArray::fromStringList(g.controlUnits)},
+            {"paused", g.frozen}, {"cpu_limit_percent", g.cpuLimit > 0 ? QJsonValue(round1(g.cpuLimit)) : QJsonValue()}};
+}
+
+// pause, resume, and limit: they change the system, so they say exactly
+// what they did, and a pause lasts until resume or logout.
+int control(const QStringList &arguments) {
+    const QString name = arguments.value(1);
+    Command command(name, name == "pause" ? "Pause an app: freeze every process in it until vitals resume."
+                          : name == "resume" ? "Resume an app that was paused."
+                                             : "Cap an app's CPU, in percent of one core, or lift the cap with off.");
+    command.json();
+    command.parser.addPositionalArgument("app", "The app's name or key (from vitals apps), a unit, or a PID in it", "<app>");
+    if (name == "limit")
+        command.parser.addPositionalArgument("percent", "Percent of one core, as in the CPU column (200 is two cores), or off",
+                                             "<percent|off>");
+    command.parser.process(arguments);
+    const QString query = command.argument(1);
+    if (query.isEmpty())
+        return fail("Name the app: vitals " + name + " <app>.");
+    double percent = 0;
+    if (name == "limit") {
+        const QString value = command.argument(2);
+        bool ok = value == "off";
+        if (!ok)
+            percent = QString(value).remove('%').toDouble(&ok);
+        if (!ok || percent < 0)
+            return fail("Give the limit in percent of one core, like 50 or 200, or off.");
+    }
+    Monitor monitor;
+    if (!monitor.error().isEmpty())
+        return fail(monitor.error());
+    QString error;
+    const GroupInfo *g = findApp(monitor, query, error);
+    if (!g)
+        return fail(error);
+    const QString key = g->key;
+    error = name == "limit" ? monitor.setAppCpuLimit(key, percent) : monitor.setAppPaused(key, name == "pause");
+    if (!error.isEmpty())
+        return fail(error);
+    g = monitor.findGroup(key);
+    if (command.parser.isSet("json")) {
+        print(controlJson(*g));
+        return 0;
+    }
+    print(stdout, name == "pause"    ? "Paused " + g->name + ". Resume it with: vitals resume " + key
+                  : name == "resume" ? "Resumed " + g->name + "."
+                  : percent > 0      ? "Limited " + g->name + " to " + QString::number(g->cpuLimit, 'f', 0)
+                                      + "% of one core until logout. Lift it with: vitals limit " + key + " off"
+                                     : "Lifted the CPU limit on " + g->name + ".");
+    return 0;
+}
+
 int appsCommand(const QStringList &arguments) {
     Command command("apps", "Every app and service, with what its processes use together.");
     command.json();
@@ -252,11 +336,17 @@ int appsCommand(const QStringList &arguments) {
     }
     QStringList out;
     out << pad("APP", 28) + pad("KIND", 9) + pad("CPU%", 7, true) + pad("MEMORY", 11, true) + pad("READ/S", 12, true)
-               + pad("WRITE/S", 12, true) + pad("PROCS", 7, true);
-    for (const GroupInfo &g : groups)
+               + pad("WRITE/S", 12, true) + pad("PROCS", 7, true) + "  STATE";
+    for (const GroupInfo &g : groups) {
+        QStringList state;
+        if (g.frozen)
+            state << "paused";
+        if (g.cpuLimit > 0)
+            state << "limit " + QString::number(g.cpuLimit, 'f', 0) + "%";
         out << pad(g.name, 28) + pad(g.kind, 9) + pad(QString::number(g.cpu, 'f', 1), 7, true)
                    + pad(bytes(g.memory), 11, true) + pad(rate(g.readRate), 12, true) + pad(rate(g.writeRate), 12, true)
-                   + pad(QString::number(g.pids.size()), 7, true);
+                   + pad(QString::number(g.pids.size()), 7, true) + "  " + state.join(", ");
+    }
     print(stdout, out.join('\n'));
     return 0;
 }
@@ -395,17 +485,21 @@ QString cliSummary() {
            "Commands that need no display (vitals help <command> for options):\n"
            "  snapshot             CPU, memory, disks, network, and the busiest apps and processes\n"
            "  apps                 Every app and service, with what its processes use together\n"
+           "  pause <app>          Freeze every process in an app until you resume it\n"
+           "  resume <app>         Resume a paused app\n"
+           "  limit <app> <%|off>  Cap an app's CPU in percent of one core, until logout\n"
            "  skill [install]      Print the skill for coding agents, or install it";
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"snapshot", "apps", "skill", "help", "--help", "-h"}.contains(word);
+    return QStringList{"snapshot", "apps", "pause", "resume", "limit", "skill", "help", "--help", "-h"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
     const QString command = arguments.value(1);
     return command == "snapshot" ? snapshot(arguments)
            : command == "apps"   ? appsCommand(arguments)
+           : command == "pause" || command == "resume" || command == "limit" ? control(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
 }

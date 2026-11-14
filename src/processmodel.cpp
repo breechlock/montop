@@ -53,6 +53,10 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const {
         case ReadRateRole: return g.readRate;
         case WriteRateRole: return g.writeRate;
         case KernelRole: return g.kind == "kernel";
+        case GroupKeyRole: return g.key;
+        case FrozenRole: return g.frozen;
+        case CpuLimitRole: return g.cpuLimit;
+        case ControlRole: return g.control;
         }
         return {};
     }
@@ -77,6 +81,15 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const {
     case ReadRateRole: return p.readRate;
     case WriteRateRole: return p.writeRate;
     case KernelRole: return p.kernel;
+    case GroupKeyRole: return p.group;
+    }
+    // A process is paused or limited with its app.
+    const auto group = m_groupIndex.constFind(p.group);
+    const GroupInfo *g = group == m_groupIndex.constEnd() ? nullptr : &m_groups.at(*group);
+    switch (role) {
+    case FrozenRole: return g && g->frozen;
+    case CpuLimitRole: return g ? g->cpuLimit : 0.0;
+    case ControlRole: return g ? g->control : QString("none");
     }
     return {};
 }
@@ -88,7 +101,8 @@ QHash<int, QByteArray> ProcessModel::roleNames() const {
         {PidRole, "pid"}, {PpidRole, "ppid"}, {NameRole, "name"}, {CommandRole, "command"},
         {UserRole, "user"}, {StateRole, "state"}, {ThreadsRole, "threads"}, {CpuRole, "cpu"},
         {MemoryRole, "memory"}, {MemoryShareRole, "memoryShare"}, {ReadRateRole, "readRate"},
-        {WriteRateRole, "writeRate"}, {KernelRole, "kernel"},
+        {WriteRateRole, "writeRate"}, {KernelRole, "kernel"}, {GroupKeyRole, "groupKey"},
+        {FrozenRole, "frozen"}, {CpuLimitRole, "cpuLimit"}, {ControlRole, "control"},
     };
 }
 
@@ -192,7 +206,18 @@ void ProcessModel::update(const QList<ProcessInfo> &processes, const QList<Group
     m_byPid.clear();
     for (int i = 0; i < m_all.size(); ++i)
         m_byPid.insert(m_all[i].pid, i);
+    m_groupIndex.clear();
+    for (int i = 0; i < m_groups.size(); ++i)
+        m_groupIndex.insert(m_groups[i].key, i);
     apply();
+}
+
+void ProcessModel::refresh(const QList<GroupInfo> &groups) {
+    if (groups.size() != m_groups.size())
+        return;
+    m_groups = groups;
+    if (!m_rows.isEmpty())
+        emit dataChanged(index(0), index(int(m_rows.size()) - 1), {FrozenRole, CpuLimitRole, ControlRole});
 }
 
 namespace {

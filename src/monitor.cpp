@@ -4,6 +4,7 @@
 #include <QMap>
 #include <QFileInfo>
 #include <QLocale>
+#include <QProcess>
 #include <QSysInfo>
 #include <algorithm>
 
@@ -36,6 +37,11 @@ Monitor::Monitor(const QString &procRoot, const QString &sysRoot, QObject *paren
         }
     }
     m_temperatureInput = findTemperatureInput();
+    m_uid = getuid();
+    // Always the real /proc: it's this process, not the one under test.
+    for (const QByteArray &line : readFile("/proc/self/cgroup", 4096).split('\n'))
+        if (line.startsWith("0::"))
+            m_selfCgroup = QString::fromUtf8(line.mid(3)).trimmed();
 
     m_clock.start();
     // Graphs scroll between samples, so a late tick shows as a stutter; a
@@ -550,9 +556,12 @@ QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, do
             m_groupNames.insert(g.key, groupName(identity, acc.names.values()));
         g.name = m_groupNames.value(g.key);
 
-        double cpu = 0, read = 0, write = 0;
+        double cpu = 0, read = 0, write = 0, limit = 0;
         quint64 memory = 0;
-        bool ioKnown = true;
+        bool ioKnown = true, limited = true;
+        // The strongest reason not to touch any of its cgroups wins.
+        static const QStringList reasons{"", "none", "system", "session", "self"};
+        int reason = 0;
         for (const QString &cgroup : acc.cgroups) {
             // The root cgroup's counters are the whole system's.
             const QByteArray cpuStat = cgroup.isEmpty() || cgroup == "/" ? QByteArray()
@@ -561,8 +570,22 @@ QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, do
                 cpu += acc.cpuByCgroup.value(cgroup);
                 memory += acc.memoryByCgroup.value(cgroup);
                 ioKnown = false;
+                reason = std::max(reason, 1);
+                limited = false;
                 continue;
             }
+            reason = std::max(reason, int(reasons.indexOf(controlOf(cgroup))));
+            if (reason == 0)
+                g.controlUnits.append(apps::classify(cgroup).unit);
+            if (readFile(root + cgroup + "/cgroup.events", 4096).contains("frozen 1"))
+                g.frozen = true;
+            // "max 100000" or "<quota> <period>"; without the file, the CPU
+            // controller is off for it, so nothing limits it.
+            const QList<QByteArray> max = readFile(root + cgroup + "/cpu.max", 256).trimmed().split(' ');
+            if (max.size() == 2 && max[0] != "max" && max[1].toDouble() > 0)
+                limit += 100.0 * max[0].toDouble() / max[1].toDouble();
+            else
+                limited = false;
             CgroupCounters now;
             for (const QByteArray &line : cpuStat.split('\n'))
                 if (line.startsWith("usage_usec "))
@@ -612,6 +635,11 @@ QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, do
         }
         g.cpu = cpu;
         g.memory = memory;
+        g.control = g.kind == "process" || g.kind == "kernel" ? QString("none") : reasons.value(reason);
+        if (!g.control.isEmpty())
+            g.controlUnits.clear();
+        // A limit counts only when every part of the app has one.
+        g.cpuLimit = limited ? limit : 0;
         g.memoryShare = m_memTotal > 0 ? memory / m_memTotal : 0;
         if (ioKnown) {
             g.readRate = read;
@@ -624,4 +652,119 @@ QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, do
     }
     m_prevCgroups = current;
     return result;
+}
+
+QString Monitor::controlOf(const QString &cgroup) const {
+    if (!m_selfCgroup.isEmpty() && cgroup == m_selfCgroup)
+        return "self";
+    const QString manager = QString("/user@%1.service/").arg(m_uid);
+    const int at = cgroup.indexOf(manager);
+    if (at < 0)
+        return "system";
+    // systemd's convention: apps in app.slice, the user's own daemons in
+    // background.slice, and what the desktop can't do without (compositor,
+    // D-Bus, audio, portals) in session.slice. The manager itself is
+    // init.scope. Freezing those would freeze the session.
+    const QString slice = cgroup.mid(at + manager.size()).section('/', 0, 0);
+    return slice == "app.slice" || slice == "background.slice" ? QString() : QString("session");
+}
+
+const GroupInfo *Monitor::findGroup(const QString &key) const {
+    for (const GroupInfo &g : m_groupList)
+        if (g.key == key)
+            return &g;
+    return nullptr;
+}
+
+QVariantMap Monitor::app(const QString &groupKey) const {
+    const GroupInfo *g = findGroup(groupKey);
+    if (!g)
+        return {};
+    return {{"key", g->key}, {"name", g->name}, {"frozen", g->frozen}, {"cpuLimit", g->cpuLimit}, {"control", g->control}};
+}
+
+QString Monitor::refusal(const GroupInfo &g) const {
+    if (g.control == "self")
+        return tr("Vitals runs inside %1, so it can't pause or limit it without pausing itself.").arg(g.name);
+    if (g.control == "session")
+        return tr("%1 keeps your desktop running, so Vitals won't pause or limit it.").arg(g.name);
+    if (g.control == "system")
+        return tr("%1 is a system service. Pausing or limiting it needs root.").arg(g.name);
+    if (!g.control.isEmpty() || g.controlUnits.isEmpty())
+        return tr("%1 has no cgroup of its own, so it can't be paused or limited.").arg(g.name);
+    return {};
+}
+
+QString Monitor::systemctl(const QStringList &arguments) {
+    QProcess process;
+    process.start(m_systemctl, QStringList{"--user"} + arguments);
+    if (!process.waitForStarted(2000))
+        return tr("Couldn't run systemctl: %1").arg(process.errorString());
+    if (!process.waitForFinished(5000)) {
+        process.kill();
+        process.waitForFinished(1000);
+        return tr("systemctl didn't answer in time.");
+    }
+    if (process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0)
+        return {};
+    const QString error = QString::fromUtf8(process.readAllStandardError()).trimmed();
+    return error.isEmpty() ? tr("systemctl failed with code %1.").arg(process.exitCode()) : error;
+}
+
+QString Monitor::setAppPaused(const QString &groupKey, bool paused) {
+    const GroupInfo *found = findGroup(groupKey);
+    if (!found)
+        return tr("That app has already exited.");
+    GroupInfo &g = m_groupList[found - m_groupList.constData()];
+    const QString refused = refusal(g);
+    if (!refused.isEmpty())
+        return refused;
+    const QString error = systemctl(QStringList{paused ? "freeze" : "thaw"} + g.controlUnits);
+    if (!error.isEmpty())
+        return error;
+    for (const QString &unit : g.controlUnits) {
+        if (paused)
+            m_pausedUnits.insert(unit);
+        else
+            m_pausedUnits.remove(unit);
+    }
+    g.frozen = paused;
+    m_processes.refresh(m_groupList);
+    return {};
+}
+
+QString Monitor::setAppCpuLimit(const QString &groupKey, double percent) {
+    const GroupInfo *found = findGroup(groupKey);
+    if (!found)
+        return tr("That app has already exited.");
+    GroupInfo &g = m_groupList[found - m_groupList.constData()];
+    const QString refused = refusal(g);
+    if (!refused.isEmpty())
+        return refused;
+    // systemd limits each unit, so an app spread over several (a terminal
+    // with a scope per window) shares the limit out between them.
+    const int units = int(g.controlUnits.size());
+    const int share = percent > 0 ? std::max(1, int(std::lround(percent / units))) : 0;
+    for (const QString &unit : g.controlUnits) {
+        const QString error = systemctl({"set-property", "--runtime", unit,
+                                         share > 0 ? QString("CPUQuota=%1%").arg(share) : QString("CPUQuota=")});
+        if (!error.isEmpty())
+            return error;
+        if (share > 0)
+            m_limitedUnits.insert(unit);
+        else
+            m_limitedUnits.remove(unit);
+    }
+    g.cpuLimit = double(share) * units;
+    m_processes.refresh(m_groupList);
+    return {};
+}
+
+void Monitor::undoControls() {
+    if (!m_pausedUnits.isEmpty())
+        systemctl(QStringList{"thaw"} + QStringList(m_pausedUnits.begin(), m_pausedUnits.end()));
+    for (const QString &unit : std::as_const(m_limitedUnits))
+        systemctl({"set-property", "--runtime", unit, "CPUQuota="});
+    m_pausedUnits.clear();
+    m_limitedUnits.clear();
 }

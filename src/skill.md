@@ -41,10 +41,24 @@ needs a display.
 - `kind` tells apps the person launched (`app`) from their own background
   services (`service`), system services (`system`), and the kernel.
 
+## Pausing and limiting
+
+- `vitals pause <app>` freezes every process of an app until
+  `vitals resume <app>`; `vitals limit <app> <percent|off>` caps its CPU in
+  percent of one core until logout. `<app>` is a name or `key` from
+  `vitals apps`, or a PID in the app.
+- Both are gentler than killing: nothing is lost, and both are undone with one
+  command. Still, they change the person's machine: only run them when asked,
+  or after proposing it and getting a yes. Always tell them how to undo it.
+- `controllable: false` in `vitals apps --json` means Vitals refuses: desktop
+  services (pausing the compositor would freeze the screen), system services,
+  or the app the command runs inside.
+
 ## Working with the person
 
 - Never end or kill processes on your own. Name what you would stop and why, and
   let them decide; `vitals open` shows the monitor, where `x` ends the selected
-  app or process after asking.
+  app or process after asking. Suggest pausing or limiting when they want the
+  machine back but not to lose the app's work.
 - Every command takes `--json`, exits 0 on success and 1 on failure, and writes
   errors to stderr. `vitals help <command>` lists a command's options.

@@ -1,7 +1,10 @@
 {
   "%1 (%2) has already exited": "%1 (%2) is al gestopt",
   "%1 GHz": "%1 GHz",
+  "%1 has no cgroup of its own, so it can't be paused or limited.": "%1 heeft geen eigen cgroup, dus het kan niet gepauzeerd of beperkt worden.",
+  "%1 is a system service. Pausing or limiting it needs root.": "%1 is een systeemdienst. Pauzeren of beperken vraagt rootrechten.",
   "%1 is part of your system, not an app you opened. Ending it can close your session or break what depends on it.": "%1 hoort bij je systeem, het is geen app die je zelf opende. Het stoppen kan je sessie afsluiten of laten haperen wat ervan afhangt.",
+  "%1 keeps your desktop running, so Vitals won't pause or limit it.": "%1 houdt je bureaublad draaiende, dus Vitals pauzeert of beperkt het niet.",
   "%1 of %2": "%1 van %2",
   "%1 of %2 match": "%1 van %2 komen overeen",
   "%1% busy": "%1% bezig",
@@ -12,6 +15,10 @@
     "one": "%n app",
     "other": "%n apps"
   },
+  "%n cores": {
+    "one": "%n kern",
+    "other": "%n kernen"
+  },
   "%n processes": {
     "one": "%n proces",
     "other": "%n processen"
@@ -21,6 +28,7 @@
     "other": "%n threads"
   },
   "? shortcuts": "? sneltoetsen",
+  "a quarter of a core": "een kwart van een kern",
   "app": "app",
   "Apps": "Apps",
   "Asked %1 (%2) to end": "%1 (%2) gevraagd om te stoppen",
@@ -31,6 +39,7 @@
   "Cancel": "Annuleren",
   "Clear the filter, close this": "Filter wissen, dit sluiten",
   "Command": "Opdracht",
+  "Couldn't run systemctl: %1": "Kon systemctl niet starten: %1",
   "Couldn't signal %1 (%2), error %3": "Kon geen signaal sturen naar %1 (%2), fout %3",
   "Couldn't signal %n of %1's processes, error %2": {
     "one": "Kon geen signaal sturen naar %n proces van %1, fout %2",
@@ -50,7 +59,9 @@
   "Filter by name, command, user, or PID": "Filter op naam, opdracht, gebruiker of PID",
   "Filter processes": "Processen filteren",
   "First or last process": "Eerste of laatste proces",
+  "half a core": "een halve kern",
   "Hiding kernel threads": "Kernelthreads verborgen",
+  "It keeps running, just slower. Percent of one core, as in the CPU column.": "Het blijft draaien, alleen trager. In procent van één kern, zoals in de CPU-kolom.",
   "Kernel": "Kernel",
   "kernel threads": "kernelthreads",
   "Kill": "Afsluiten",
@@ -62,6 +73,11 @@
   "Kill the selected app or process (SIGKILL)": "Geselecteerde app of proces geforceerd afsluiten (SIGKILL)",
   "Killed %1": "%1 geforceerd afgesloten",
   "Killed %1 (%2)": "%1 (%2) geforceerd afgesloten",
+  "Lifted the CPU limit on %1": "CPU-limiet van %1 opgeheven",
+  "Limit %1's CPU": "CPU van %1 beperken",
+  "Limit the selected app's CPU": "CPU van de geselecteerde app beperken",
+  "Limited %1 to %2% CPU. It lifts when Vitals closes.": "%1 beperkt tot %2% CPU. Dat vervalt als Vitals sluit.",
+  "limited to %1%": "beperkt tot %1%",
   "load %1": "belasting %1",
   "login session": "aanmeldsessie",
   "Login session": "Aanmeldsessie",
@@ -69,6 +85,7 @@
   "Move a page": "Een pagina verder of terug",
   "Name": "Naam",
   "Network": "Netwerk",
+  "No limit": "Geen limiet",
   "No network interfaces": "Geen netwerkinterfaces",
   "Not allowed to signal %1 (%2): it belongs to another user": "Geen toestemming voor %1 (%2): het hoort bij een andere gebruiker",
   "Not allowed to signal %n of %1's processes: they belong to another user": {
@@ -76,14 +93,18 @@
     "other": "Geen toestemming voor %n processen van %1: ze horen bij een andere gebruiker"
   },
   "Nothing matches “%1”": "Niets komt overeen met “%1”",
+  "now": "nu",
   "Open or close an app": "Een app openen of sluiten",
+  "Pause or resume the selected app": "Geselecteerde app pauzeren of hervatten",
   "Pause or resume updates": "Updates pauzeren of hervatten",
-  "Paused": "Gepauzeerd",
+  "paused": "gepauzeerd",
+  "Paused %1. Press p to resume it; it also resumes when Vitals closes.": "%1 gepauzeerd. Druk op p om te hervatten; het hervat ook als Vitals sluit.",
   "PID": "PID",
   "process": "proces",
   "Processes": "Processen",
   "Quit": "Afsluiten",
   "Read/s": "Lezen/s",
+  "Resumed %1": "%1 hervat",
   "Reverse the sort": "Sortering omkeren",
   "Select an app or process": "Een app of proces selecteren",
   "Shortcuts": "Sneltoetsen",
@@ -97,13 +118,19 @@
   "Sort by the next column": "Sorteren op de volgende kolom",
   "Swap": "Swap",
   "system service": "systeemdienst",
+  "systemctl didn't answer in time.": "systemctl antwoordde niet op tijd.",
+  "systemctl failed with code %1.": "systemctl mislukte met code %1.",
+  "That app has already exited.": "Die app is al gestopt.",
   "Thr": "Thr",
   "Total ▼ %1  ▲ %2": "Totaal ▼ %1  ▲ %2",
   "up %1": "actief %1",
+  "Up to %1%": "Tot %1%",
   "Update less or more often": "Minder of vaker bijwerken",
+  "Updates paused": "Updates gepauzeerd",
   "Updating every %1 s": "Bijwerken elke %1 s",
   "Used": "Gebruikt",
   "User": "Gebruiker",
+  "Vitals runs inside %1, so it can't pause or limit it without pausing itself.": "Vitals draait in %1, dus het kan dat niet pauzeren of beperken zonder zichzelf te pauzeren.",
   "Write/s": "Schrijven/s",
   "your service": "eigen dienst"
 }

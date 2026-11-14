@@ -37,6 +37,14 @@ struct GroupInfo {
     double memoryShare = 0;
     double readRate = -1;
     double writeRate = -1;
+    // Pausing and limiting go through systemd's user manager, unit by unit.
+    QStringList controlUnits; // As systemd names them, escapes and all.
+    // Why it can't be paused or limited, or empty when it can: "self"
+    // (Vitals runs inside it), "session" (the desktop needs it), "system"
+    // (it isn't the user's), or "none" (no cgroup of its own).
+    QString control;
+    bool frozen = false;
+    double cpuLimit = 0; // Percent of one core, like cpu; 0 for none.
 };
 
 // The process table, as apps with their processes beneath them or as a flat
@@ -80,6 +88,10 @@ public:
         ReadRateRole,
         WriteRateRole,
         KernelRole,
+        GroupKeyRole,
+        FrozenRole,
+        CpuLimitRole,
+        ControlRole,
     };
 
     explicit ProcessModel(QObject *parent = nullptr);
@@ -114,6 +126,8 @@ public:
     Q_INVOKABLE QString parentKey(const QString &key) const;
 
     void update(const QList<ProcessInfo> &processes, const QList<GroupInfo> &groups);
+    // Repaints rows after an app was paused or limited, without a new scan.
+    void refresh(const QList<GroupInfo> &groups);
 
     // Sorting and filtering, shared with the command line.
     static bool lessThan(const ProcessInfo &a, const ProcessInfo &b, Column column, bool descending);
@@ -141,6 +155,7 @@ private:
     QList<ProcessInfo> m_all;
     QList<GroupInfo> m_groups;
     QHash<int, int> m_byPid;
+    QHash<QString, int> m_groupIndex;
     QList<Row> m_rows;
     QSet<QString> m_expanded;
     Column m_column = Cpu;

@@ -98,6 +98,24 @@ public:
     // how many failed, with the first failure's errno.
     Q_INVOKABLE QVariantMap signalProcesses(const QVariantList &pids, bool force);
 
+    // Pausing (freezing) an app and capping its CPU, through systemd's user
+    // manager so systemd stays in charge of its own units. Only the user's
+    // apps and background services qualify: not the desktop's own services,
+    // not the system's, and not the app Vitals itself runs in. Returns an
+    // empty string, or why it didn't happen in a sentence for the window.
+    Q_INVOKABLE QString setAppPaused(const QString &groupKey, bool paused);
+    // `percent` is of one core, as in the CPU column; 0 lifts the limit.
+    Q_INVOKABLE QString setAppCpuLimit(const QString &groupKey, double percent);
+    // Thaws and unlimits what this monitor paused or limited, so nothing
+    // stays frozen after the window closes. The command line doesn't call
+    // it: there, a pause is meant to last.
+    void undoControls();
+    // The program run for the above; tests hand in a fake.
+    void setSystemctl(const QString &program) { m_systemctl = program; }
+    const GroupInfo *findGroup(const QString &key) const;
+    // An app's name and state for the window: name, frozen, cpuLimit, control.
+    Q_INVOKABLE QVariantMap app(const QString &groupKey) const;
+
     // The latest process scan, for the command line.
     const QList<ProcessInfo> &processList() const { return m_processList; }
     const QList<GroupInfo> &groupList() const { return m_groupList; }
@@ -131,6 +149,9 @@ private:
     QList<GroupInfo> groupProcesses(const QList<ProcessInfo> &processes, double seconds);
     QString groupName(const apps::Identity &identity, const QStringList &memberNames);
     QString findTemperatureInput() const;
+    QString controlOf(const QString &cgroup) const;
+    QString refusal(const GroupInfo &group) const;
+    QString systemctl(const QStringList &arguments);
     QString userName(uint uid);
     void push(const QString &series, qreal value);
 
@@ -184,4 +205,9 @@ private:
     std::optional<apps::DesktopNames> m_desktopNames;
     QHash<QString, QString> m_groupNames;
     long m_pageSize = 4096;
+
+    QString m_systemctl = "systemctl";
+    QString m_selfCgroup;
+    uint m_uid = 0;
+    QSet<QString> m_pausedUnits, m_limitedUnits;
 };

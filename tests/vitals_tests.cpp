@@ -6,6 +6,7 @@
 #include <QSignalSpy>
 #include <QTemporaryDir>
 #include <QtTest>
+#include <unistd.h>
 
 #include "apps.h"
 #include "cli.h"
@@ -311,6 +312,60 @@ private slots:
         QCOMPARE(snapshot["processes"].toArray().first().toObject()["app"].toString(), g.name);
         QVERIFY(snapshot["memory"].toObject()["total_bytes"].toDouble() > 0);
         QVERIFY(snapshot["cpu"].toObject()["temperature_celsius"].isNull());
+    }
+
+    void monitorPausesAndLimitsApps()
+    {
+        QTemporaryDir root;
+        const QString proc = root.filePath("proc"), sys = root.filePath("sys");
+        const QString manager = QString("/user.slice/user-%1.slice/user@%1.service").arg(getuid());
+        const QString app = manager + "/app.slice/app-Hyprland-busy-1a2b.scope";
+        const QString compositor = manager + "/session.slice/wayland-wm@hyprland.desktop.service";
+        const QString system = "/system.slice/upower.service";
+        write(proc + "/meminfo", "MemTotal: 1000 kB\nMemAvailable: 600 kB\n");
+        write(proc + "/stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n");
+        const QList<QPair<int, QString>> processes{{100, app}, {200, compositor}, {300, system}};
+        for (const auto &[pid, cgroup] : processes) {
+            write(proc + QString("/%1/stat").arg(pid), pidStat(pid, "p" + QByteArray::number(pid), 0));
+            write(proc + QString("/%1/cgroup").arg(pid), "0::" + cgroup.toUtf8() + "\n");
+            write(sys + "/fs/cgroup" + cgroup + "/cpu.stat", "usage_usec 0\n");
+        }
+        write(sys + "/fs/cgroup" + app + "/cpu.max", "50000 100000\n");
+        write(sys + "/fs/cgroup" + app + "/cgroup.events", "populated 1\nfrozen 1\n");
+        // Records what it was asked, the way systemctl would be.
+        const QString log = root.filePath("calls");
+        write(root.filePath("systemctl"), "#!/bin/sh\necho \"$*\" >> " + log.toUtf8() + "\n");
+        QFile::setPermissions(root.filePath("systemctl"), QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner);
+
+        Monitor monitor(proc, sys);
+        monitor.setSystemctl(root.filePath("systemctl"));
+        const GroupInfo *busy = monitor.findGroup("app:busy");
+        QVERIFY(busy);
+        QVERIFY(busy->control.isEmpty());
+        QVERIFY(busy->frozen);
+        QCOMPARE(busy->cpuLimit, 50.0);
+        QCOMPARE(busy->controlUnits, QStringList{"app-Hyprland-busy-1a2b.scope"});
+        QCOMPARE(monitor.findGroup("service:wayland-wm@hyprland.desktop")->control, QString("session"));
+        QCOMPARE(monitor.findGroup("system:upower")->control, QString("system"));
+
+        QVERIFY(monitor.setAppPaused("app:busy", false).isEmpty());
+        QVERIFY(!monitor.findGroup("app:busy")->frozen);
+        QVERIFY(monitor.setAppCpuLimit("app:busy", 25).isEmpty());
+        QCOMPARE(monitor.findGroup("app:busy")->cpuLimit, 25.0);
+        // The desktop's own services and the system's are never touched.
+        QVERIFY(!monitor.setAppPaused("service:wayland-wm@hyprland.desktop", true).isEmpty());
+        QVERIFY(!monitor.setAppCpuLimit("system:upower", 10).isEmpty());
+        QVERIFY(monitor.setAppPaused("app:busy", true).isEmpty());
+        monitor.undoControls();
+
+        QFile calls(log);
+        QVERIFY(calls.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(calls.readAll()).split('\n', Qt::SkipEmptyParts),
+                 QStringList({"--user thaw app-Hyprland-busy-1a2b.scope",
+                              "--user set-property --runtime app-Hyprland-busy-1a2b.scope CPUQuota=25%",
+                              "--user freeze app-Hyprland-busy-1a2b.scope",
+                              "--user thaw app-Hyprland-busy-1a2b.scope",
+                              "--user set-property --runtime app-Hyprland-busy-1a2b.scope CPUQuota="}));
     }
 
     void monitorSaysWhenProcIsMissing()

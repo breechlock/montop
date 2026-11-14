@@ -87,6 +87,15 @@ Panel {
         return kind
     }
 
+    function groupDetail(kind, count, frozen, limit) {
+        const parts = [kindLabel(kind), qsTr("%n processes", "", count)]
+        if (frozen)
+            parts.unshift(qsTr("paused"))
+        if (limit > 0)
+            parts.unshift(qsTr("limited to %1%").arg(Math.round(limit)))
+        return parts.join("  ·  ")
+    }
+
     function startFilter() { filterField.forceActiveFocus(); filterField.selectAll() }
     function clearFilter() { filterField.text = ""; list.forceActiveFocus() }
 
@@ -237,6 +246,8 @@ Panel {
                 required property real memory
                 required property real readRate
                 required property real writeRate
+                required property bool frozen
+                required property real cpuLimit
                 readonly property bool current: key === root.selectedKey
 
                 width: ListView.view.width
@@ -287,7 +298,8 @@ Panel {
                             x: row.isGroup ? marker.width : row.depth * 14
                             width: parent.width - x
                             text: row.name
-                            color: row.current ? theme.accent : row.isGroup || row.depth === 0 ? theme.colors.bright_foreground : theme.colors.foreground
+                            color: row.frozen ? theme.colors.yellow
+                                 : row.current ? theme.accent : row.isGroup || row.depth === 0 ? theme.colors.bright_foreground : theme.colors.foreground
                             font.bold: row.current || row.isGroup
                             elide: Text.ElideRight
                         }
@@ -295,7 +307,7 @@ Panel {
                     Label {
                         width: root.columnWidth(2)
                         visible: root.shown[2]
-                        text: row.isGroup ? root.kindLabel(row.kind) + "  ·  " + qsTr("%n processes", "", row.processCount) : row.command
+                        text: row.isGroup ? root.groupDetail(row.kind, row.processCount, row.frozen, row.cpuLimit) : row.command
                         color: row.quiet
                         elide: Text.ElideRight
                     }

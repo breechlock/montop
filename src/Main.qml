@@ -27,7 +27,7 @@ ApplicationWindow {
     property bool showProcesses: true
     // Single-letter shortcuts stand down while the filter has the keyboard
     // or a question is open, so typing doesn't kill processes.
-    readonly property bool typing: processes.filtering || confirm.visible
+    readonly property bool typing: processes.filtering || confirm.visible || limiter.visible
     readonly property bool leftColumn: showMemory || showDisks || showNetwork
 
     // The frame clock every graph shares: 0 when a sample lands, 1 when the
@@ -67,10 +67,45 @@ ApplicationWindow {
     }
     Timer { id: messageTimer; interval: 4000; onTriggered: win.message = "" }
 
+    // Pausing and limiting act on the whole app, also from a process row.
+    function selectedApp() {
+        const s = processes.selected
+        const app = s ? monitor.app(s.groupKey) : null
+        if (s && !app.key)
+            win.say(qsTr("%1 has no cgroup of its own, so it can't be paused or limited.").arg(s.name), true)
+        return app && app.key ? app : null
+    }
+    function togglePause() {
+        const app = selectedApp()
+        if (!app)
+            return
+        const error = monitor.setAppPaused(app.key, !app.frozen)
+        if (error.length > 0)
+            win.say(error, true)
+        else
+            win.say(app.frozen ? qsTr("Resumed %1").arg(app.name)
+                               : qsTr("Paused %1. Press p to resume it; it also resumes when Vitals closes.").arg(app.name))
+    }
+    function askToLimit() {
+        const app = selectedApp()
+        if (!app)
+            return
+        if (app.control.length > 0) {
+            // Same sentence the monitor gives, without a pointless dialog.
+            win.say(monitor.setAppCpuLimit(app.key, app.cpuLimit), true)
+            return
+        }
+        limiter.key = app.key
+        limiter.name = app.name
+        limiter.current = app.cpuLimit
+        limiter.open()
+    }
+
     function askToEnd(force) {
         const p = processes.selected
         if (!p)
             return
+        confirm.key = p.groupKey
         confirm.pid = p.pid
         confirm.name = p.name
         confirm.pids = p.isGroup ? p.pids : []
@@ -123,6 +158,8 @@ ApplicationWindow {
     Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.toggleGrouped() }
     Shortcut { sequences: ["Right", "L", "Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.expand() }
     Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.collapse() }
+    Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.togglePause() }
+    Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToLimit() }
     Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToEnd(false) }
     Shortcut { sequence: "Shift+X"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToEnd(true) }
     Shortcut {
@@ -168,7 +205,7 @@ ApplicationWindow {
                 Item { Layout.fillWidth: true }
                 Label {
                     visible: monitor.paused
-                    text: qsTr("Paused")
+                    text: qsTr("Updates paused")
                     color: theme.colors.yellow
                     font.bold: true
                 }
@@ -243,8 +280,10 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     text: win.message.length > 0 ? win.message
                         : !processes.selected ? ""
-                        : processes.selected.isGroup ? processes.selected.name + "  ·  " + processes.selected.command
-                        : processes.selected.pid + "  " + processes.selected.command
+                        : [processes.selected.isGroup ? processes.selected.name : processes.selected.pid + ""]
+                            .concat(processes.selected.frozen ? [qsTr("paused")] : [])
+                            .concat(processes.selected.cpuLimit > 0 ? [qsTr("limited to %1%").arg(Math.round(processes.selected.cpuLimit))] : [])
+                            .concat([processes.selected.command]).join("  ·  ")
                     color: win.message.length > 0 ? (win.messageIsError ? theme.colors.red : theme.accent) : theme.colors.dark_foreground
                     elide: Text.ElideRight
                 }
@@ -266,6 +305,7 @@ ApplicationWindow {
         id: confirm
 
         property int pid
+        property string key
         property string name
         property bool force
         // Every process of an app, when the selection is an app.
@@ -293,6 +333,9 @@ ApplicationWindow {
         }
 
         function accept() {
+            // A frozen process can't act on SIGTERM; let it go first.
+            if (group && monitor.app(key).frozen)
+                monitor.setAppPaused(key, false)
             if (group) {
                 const result = monitor.signalProcesses(pids, force)
                 close()
@@ -362,6 +405,127 @@ ApplicationWindow {
                     onClicked: confirm.accept()
                     Keys.onReturnPressed: confirm.accept()
                     Keys.onEnterPressed: confirm.accept()
+                }
+            }
+        }
+    }
+
+    // Caps an app's CPU through systemd, in the CPU column's own unit:
+    // percent of one core.
+    Popup {
+        id: limiter
+
+        property string key
+        property string name
+        property real current
+        readonly property var choices: {
+            const list = [0, 25, 50, 100]
+            for (let n = 200; n < monitor.coreCount * 100; n *= 2)
+                list.push(n)
+            return list
+        }
+        function describe(percent) {
+            if (percent === 25)
+                return qsTr("a quarter of a core")
+            if (percent === 50)
+                return qsTr("half a core")
+            return percent >= 100 ? qsTr("%n cores", "", percent / 100) : ""
+        }
+        function apply(percent) {
+            const error = monitor.setAppCpuLimit(key, percent)
+            close()
+            if (error.length > 0)
+                win.say(error, true)
+            else if (percent === 0)
+                win.say(qsTr("Lifted the CPU limit on %1").arg(name))
+            else
+                win.say(qsTr("Limited %1 to %2% CPU. It lifts when Vitals closes.").arg(name).arg(percent))
+        }
+
+        anchors.centerIn: parent
+        modal: true
+        focus: true
+        padding: 20
+        closePolicy: Popup.CloseOnEscape
+        Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, theme.dark ? 0.55 : 0.3) }
+        onOpened: {
+            const at = choices.indexOf(Math.round(current))
+            choiceList.currentIndex = at >= 0 ? at : 0
+            choiceList.forceActiveFocus()
+        }
+
+        background: Rectangle {
+            color: theme.colors.lighter_background
+            border.width: 1
+            border.color: theme.accent
+            radius: theme.radius
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: qsTr("Limit %1's CPU").arg(limiter.name)
+                color: theme.colors.bright_foreground
+                font.bold: true
+                font.pixelSize: 15
+            }
+            Label {
+                Layout.maximumWidth: 380
+                wrapMode: Text.Wrap
+                text: qsTr("It keeps running, just slower. Percent of one core, as in the CPU column.")
+                color: theme.colors.foreground
+            }
+            ListView {
+                id: choiceList
+                Layout.fillWidth: true
+                Layout.preferredWidth: 340
+                Layout.preferredHeight: count * 26
+                interactive: false
+                model: limiter.choices
+                keyNavigationEnabled: true
+                Keys.onReturnPressed: limiter.apply(limiter.choices[currentIndex])
+                Keys.onEnterPressed: limiter.apply(limiter.choices[currentIndex])
+                Keys.onPressed: event => {
+                    if (event.key === Qt.Key_J) { incrementCurrentIndex(); event.accepted = true }
+                    else if (event.key === Qt.Key_K) { decrementCurrentIndex(); event.accepted = true }
+                }
+                delegate: Rectangle {
+                    id: choice
+                    required property int index
+                    required property int modelData
+                    readonly property bool current: ListView.isCurrentItem
+                    width: ListView.view.width
+                    height: 26
+                    radius: Math.min(3, theme.radius)
+                    color: current ? theme.colors.selection : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 12
+                        Label {
+                            text: choice.modelData === 0 ? qsTr("No limit") : qsTr("Up to %1%").arg(choice.modelData)
+                            color: choice.current ? theme.accent : theme.colors.bright_foreground
+                            font.bold: choice.current
+                        }
+                        Label {
+                            Layout.fillWidth: true
+                            text: limiter.describe(choice.modelData)
+                            color: theme.colors.dark_foreground
+                            elide: Text.ElideRight
+                        }
+                        Label {
+                            visible: Math.round(limiter.current) === choice.modelData
+                            text: qsTr("now")
+                            color: theme.accent
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: limiter.apply(choice.modelData)
+                    }
                 }
             }
         }
