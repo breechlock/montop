@@ -368,6 +368,50 @@ private slots:
                               "--user set-property --runtime app-Hyprland-busy-1a2b.scope CPUQuota="}));
     }
 
+    void monitorRewindsToEarlierMoments()
+    {
+        QTemporaryDir root;
+        const QString proc = root.filePath("proc"), sys = root.filePath("sys");
+        const QString scope = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-Hyprland-build-1a2b.scope";
+        write(proc + "/meminfo", "MemTotal: 1000 kB\nMemAvailable: 600 kB\n");
+        write(proc + "/stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n");
+        write(proc + "/100/stat", pidStat(100, "make", 0));
+        write(proc + "/100/cgroup", "0::" + scope.toUtf8() + "\n");
+        write(sys + "/fs/cgroup" + scope + "/cpu.stat", "usage_usec 0\n");
+        Monitor monitor(proc, sys);
+
+        // A burst of CPU, then nothing.
+        QTest::qWait(20);
+        write(sys + "/fs/cgroup" + scope + "/cpu.stat", "usage_usec 20000\n");
+        monitor.sample();
+        const double burst = monitor.sampleTime(0);
+        QTest::qWait(20);
+        monitor.sample();
+        QCOMPARE(monitor.findGroup("app:build")->cpu, 0.0);
+
+        const QVariantList blamed = monitor.blame(burst, "cpu", 3);
+        QCOMPARE(blamed.size(), 1);
+        QCOMPARE(blamed.first().toMap()["key"].toString(), QString("app:build"));
+        QVERIFY(blamed.first().toMap()["value"].toDouble() > 10);
+
+        QSignalSpy rewound(&monitor, &Monitor::rewindChanged);
+        monitor.rewindTo(burst);
+        QCOMPARE(monitor.rewoundTo(), monitor.momentTime(burst));
+        QCOMPARE(rewound.count(), 1);
+        ProcessModel *model = monitor.processes();
+        QVERIFY(model->data(model->index(model->rowOf("g:app:build")), ProcessModel::CpuRole).toDouble() > 10);
+        // New scans don't move the list while it shows the past.
+        monitor.sample();
+        QVERIFY(model->data(model->index(model->rowOf("g:app:build")), ProcessModel::CpuRole).toDouble() > 10);
+
+        // Rewinding further than the history holds stops at its start.
+        monitor.rewindBy(-3600);
+        QCOMPARE(monitor.rewoundTo(), monitor.historyStart());
+        monitor.rewindTo(0);
+        QCOMPARE(monitor.rewoundTo(), 0.0);
+        QCOMPARE(model->data(model->index(model->rowOf("g:app:build")), ProcessModel::CpuRole).toDouble(), 0.0);
+    }
+
     void monitorSaysWhenProcIsMissing()
     {
         QTemporaryDir root;

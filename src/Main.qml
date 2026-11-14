@@ -67,8 +67,30 @@ ApplicationWindow {
     }
     Timer { id: messageTimer; interval: 4000; onTriggered: win.message = "" }
 
+    // Times on the graphs and while rewound, in the language's own format.
+    function clock(time) {
+        translator.language
+        return new Date(time).toLocaleTimeString(Qt.locale(), "HH:mm:ss")
+    }
+    function ago(time) {
+        const seconds = Math.max(0, Math.round((Date.now() - time) / 1000))
+        if (seconds < 60)
+            return qsTr("%1 s ago").arg(seconds)
+        return qsTr("%1 min %2 s ago").arg(Math.floor(seconds / 60)).arg(seconds % 60)
+    }
+    // A list from the past can't be acted on: its PIDs may belong to other
+    // processes by now.
+    function live() {
+        if (monitor.rewoundTo === 0)
+            return true
+        win.say(qsTr("This is how things were at %1. Press Esc to return to now first.").arg(clock(monitor.rewoundTo)), true)
+        return false
+    }
+
     // Pausing and limiting act on the whole app, also from a process row.
     function selectedApp() {
+        if (!live())
+            return null
         const s = processes.selected
         const app = s ? monitor.app(s.groupKey) : null
         if (s && !app.key)
@@ -103,7 +125,7 @@ ApplicationWindow {
 
     function askToEnd(force) {
         const p = processes.selected
-        if (!p)
+        if (!p || !live())
             return
         confirm.key = p.groupKey
         confirm.pid = p.pid
@@ -133,6 +155,8 @@ ApplicationWindow {
         onActivated: {
             if (win.helpVisible)
                 win.helpVisible = false
+            else if (monitor.rewoundTo > 0)
+                monitor.rewindTo(0)
             else if (monitor.processes.filter.length > 0)
                 processes.clearFilter()
         }
@@ -158,6 +182,10 @@ ApplicationWindow {
     Shortcut { sequence: "A"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.toggleGrouped() }
     Shortcut { sequences: ["Right", "L", "Return", "Enter"]; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.expand() }
     Shortcut { sequences: ["Left", "H"]; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: processes.collapse() }
+    Shortcut { sequence: "["; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: monitor.rewindBy(-10) }
+    Shortcut { sequence: "]"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: monitor.rewindBy(10) }
+    Shortcut { sequence: "{"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: monitor.rewindBy(-60) }
+    Shortcut { sequence: "}"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: monitor.rewindBy(60) }
     Shortcut { sequence: "P"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.togglePause() }
     Shortcut { sequence: "C"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToLimit() }
     Shortcut { sequence: "X"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.askToEnd(false) }
@@ -203,6 +231,12 @@ ApplicationWindow {
                     color: theme.colors.dark_foreground
                 }
                 Item { Layout.fillWidth: true }
+                Label {
+                    visible: monitor.rewoundTo > 0
+                    text: { win.sampledAt; return qsTr("Showing %1, %2  ·  Esc returns to now").arg(win.clock(monitor.rewoundTo)).arg(win.ago(monitor.rewoundTo)) }
+                    color: theme.accent
+                    font.bold: true
+                }
                 Label {
                     visible: monitor.paused
                     text: qsTr("Updates paused")

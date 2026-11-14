@@ -28,6 +28,7 @@ Panel {
             Layout.fillHeight: true
             Layout.minimumHeight: 24
             series: "memory"
+            blame: "memory"
             maximum: 1
             color: theme.colors.magenta
         }

@@ -24,6 +24,7 @@ Panel {
     Connections {
         target: monitor
         function onSampled() { root.tick++ }
+        function onRewindChanged() { root.tick++ }
     }
     Connections {
         target: root.model
@@ -101,10 +102,16 @@ Panel {
 
     function number(value, decimals) { return value.toLocaleString(Qt.locale(), 'f', decimals) }
 
-    title: model.grouped ? qsTr("Apps") : qsTr("Processes")
+    readonly property bool rewound: monitor.rewoundTo > 0
+    title: rewound ? (model.grouped ? qsTr("Apps at %1") : qsTr("Processes at %1")).arg(ApplicationWindow.window.clock(monitor.rewoundTo))
+         : model.grouped ? qsTr("Apps") : qsTr("Processes")
     key: "5"
+    detailColor: rewound ? theme.accent : theme.colors.dark_foreground
     detail: {
         translator.language
+        // The past keeps only what was busy or large.
+        if (rewound)
+            return qsTr("busy and large apps only")
         if (model.filter.length > 0 && !model.grouped)
             return qsTr("%1 of %2 match").arg(model.count).arg(model.total)
         const parts = [qsTr("%n processes", "", model.total), qsTr("%n threads", "", monitor.taskCount)]

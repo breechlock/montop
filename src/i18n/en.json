@@ -2,6 +2,8 @@
   "%1 has no cgroup of its own, so it can't be paused or limited.": "%1 has no cgroup of its own, so it can't be paused or limited.",
   "%1 is a system service. Pausing or limiting it needs root.": "%1 is a system service. Pausing or limiting it needs root.",
   "%1 keeps your desktop running, so Vitals won't pause or limit it.": "%1 keeps your desktop running, so Vitals won't pause or limit it.",
+  "%1 min %2 s ago": "%1 min %2 s ago",
+  "%1 s ago": "%1 s ago",
   "%n apps": {
     "one": "%n app",
     "other": "%n apps"
@@ -19,6 +21,9 @@
     "other": "%n threads"
   },
   "a quarter of a core": "a quarter of a core",
+  "Apps at %1": "Apps at %1",
+  "busy and large apps only": "busy and large apps only",
+  "Click to see the apps as they were": "Click to see the apps as they were",
   "Couldn't run systemctl: %1": "Couldn't run systemctl: %1",
   "Couldn't signal %n of %1's processes, error %2": {
     "one": "Couldn't signal %n of %1's processes, error %2",
@@ -48,10 +53,15 @@
   "Pause or resume the selected app": "Pause or resume the selected app",
   "paused": "paused",
   "Paused %1. Press p to resume it; it also resumes when Vitals closes.": "Paused %1. Press p to resume it; it also resumes when Vitals closes.",
+  "Processes at %1": "Processes at %1",
   "Resumed %1": "Resumed %1",
+  "Return to now, clear the filter, close this": "Return to now, clear the filter, close this",
+  "Rewind or go forward 10 s, or a minute": "Rewind or go forward 10 s, or a minute",
+  "Showing %1, %2  ·  Esc returns to now": "Showing %1, %2  ·  Esc returns to now",
   "systemctl didn't answer in time.": "systemctl didn't answer in time.",
   "systemctl failed with code %1.": "systemctl failed with code %1.",
   "That app has already exited.": "That app has already exited.",
+  "This is how things were at %1. Press Esc to return to now first.": "This is how things were at %1. Press Esc to return to now first.",
   "Up to %1%": "Up to %1%",
   "Updates paused": "Updates paused",
   "Vitals runs inside %1, so it can't pause or limit it without pausing itself.": "Vitals runs inside %1, so it can't pause or limit it without pausing itself."

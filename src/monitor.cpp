@@ -1,5 +1,6 @@
 #include "monitor.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QMap>
 #include <QFileInfo>
@@ -163,6 +164,9 @@ void Monitor::sampleSystem() {
     const qint64 now = m_clock.elapsed();
     const double seconds = m_lastSample < 0 ? 0 : (now - m_lastSample) / 1000.0;
     m_lastSample = now;
+    m_sampleTimes.append(QDateTime::currentMSecsSinceEpoch());
+    if (m_sampleTimes.size() > HistoryLength)
+        m_sampleTimes.remove(0, m_sampleTimes.size() - HistoryLength);
 
     sampleCpu();
     sampleMemory();
@@ -468,7 +472,136 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
     m_taskCount = tasks;
     m_processList = processes;
     m_groupList = groupProcesses(processes, seconds);
-    m_processes.update(m_processList, m_groupList);
+    recordMoment();
+    // While rewound, the list holds still on the moment being looked at.
+    if (m_rewoundTo == 0)
+        m_processes.update(m_processList, m_groupList);
+}
+
+void Monitor::recordMoment() {
+    // What explains a spike: every app or process that was doing something,
+    // and the ones holding the most memory. Idle services add nothing to
+    // look back at but would cost memory once a second for ten minutes.
+    auto io = [](double rate) { return std::max(0.0, rate); };
+    Moment moment;
+    moment.time = QDateTime::currentMSecsSinceEpoch();
+
+    QList<GroupInfo> groups = m_groupList;
+    std::sort(groups.begin(), groups.end(), [](const GroupInfo &a, const GroupInfo &b) { return a.memory > b.memory; });
+    for (int i = 0; i < groups.size(); ++i) {
+        GroupInfo g = groups[i];
+        if (i >= 20 && g.cpu < 0.1 && io(g.readRate) + io(g.writeRate) == 0)
+            continue;
+        // The same few strings come back every second; keep one copy each.
+        g.key = intern(g.key);
+        g.name = intern(g.name);
+        g.kind = intern(g.kind);
+        g.user = intern(g.user);
+        g.control = intern(g.control);
+        for (QString &unit : g.units)
+            unit = intern(unit);
+        g.controlUnits.clear(); // The past can't be paused.
+        moment.groups.append(g);
+    }
+
+    QList<ProcessInfo> byMemory = m_processList;
+    std::sort(byMemory.begin(), byMemory.end(), [](const ProcessInfo &a, const ProcessInfo &b) { return a.memory > b.memory; });
+    for (int i = 0; i < byMemory.size(); ++i) {
+        ProcessInfo p = byMemory[i];
+        if (i >= 20 && p.cpu < 0.5 && io(p.readRate) + io(p.writeRate) == 0)
+            continue;
+        p.group = intern(p.group);
+        p.name = intern(p.name);
+        p.user = intern(p.user);
+        moment.processes.append(p);
+    }
+    moment.groups.squeeze();
+    moment.processes.squeeze();
+
+    m_moments.append(moment);
+    if (m_moments.size() > MomentCount)
+        m_moments.remove(0, m_moments.size() - MomentCount);
+    // Strings no moment uses any more go once the pool outgrows its use.
+    if (m_strings.size() > 4096)
+        m_strings.clear();
+}
+
+QString Monitor::intern(const QString &text) {
+    const auto it = m_strings.constFind(text);
+    if (it != m_strings.constEnd())
+        return *it;
+    m_strings.insert(text);
+    return text;
+}
+
+int Monitor::momentAt(double time) const {
+    if (m_moments.isEmpty())
+        return -1;
+    // A scan reports what happened since the one before it, so the moment
+    // that explains a time is the first scan at or after it.
+    auto it = std::lower_bound(m_moments.begin(), m_moments.end(), qint64(time),
+                               [](const Moment &m, qint64 t) { return m.time < t; });
+    return it == m_moments.end() ? int(m_moments.size()) - 1 : int(it - m_moments.begin());
+}
+
+void Monitor::rewindTo(double time) {
+    const int at = time > 0 ? momentAt(time) : -1;
+    const double moment = at < 0 || at == m_moments.size() - 1 ? 0 : double(m_moments[at].time);
+    if (moment == m_rewoundTo)
+        return;
+    m_rewoundTo = moment;
+    if (at >= 0 && moment > 0)
+        m_processes.update(m_moments[at].processes, m_moments[at].groups);
+    else
+        m_processes.update(m_processList, m_groupList);
+    emit rewindChanged();
+}
+
+void Monitor::rewindBy(double seconds) {
+    if (m_moments.isEmpty())
+        return;
+    const double from = m_rewoundTo > 0 ? m_rewoundTo : double(m_moments.last().time);
+    // Never past the oldest moment: rewinding further holds there.
+    rewindTo(std::max(double(m_moments.first().time), from + seconds * 1000));
+}
+
+double Monitor::sampleTime(int samplesBack) const {
+    const int index = int(m_sampleTimes.size()) - 1 - samplesBack;
+    return index >= 0 && index < m_sampleTimes.size() ? double(m_sampleTimes[index]) : 0;
+}
+
+double Monitor::momentTime(double time) const {
+    const int at = momentAt(time);
+    return at < 0 ? 0 : double(m_moments[at].time);
+}
+
+int Monitor::samplesSince(double time) const {
+    const auto it = std::upper_bound(m_sampleTimes.begin(), m_sampleTimes.end(), qint64(time));
+    return int(m_sampleTimes.end() - it);
+}
+
+QVariantList Monitor::blame(double time, const QString &what, int count) const {
+    const int at = momentAt(time);
+    if (at < 0)
+        return {};
+    const Moment &moment = m_moments[at];
+    auto value = [&](const GroupInfo &g) {
+        return what == "memory" ? double(g.memory)
+               : what == "read" ? std::max(0.0, g.readRate)
+               : what == "write" ? std::max(0.0, g.writeRate)
+               : what == "io" ? std::max(0.0, g.readRate) + std::max(0.0, g.writeRate)
+                              : g.cpu;
+    };
+    QList<const GroupInfo *> groups;
+    for (const GroupInfo &g : moment.groups)
+        if (value(g) > 0)
+            groups.append(&g);
+    std::sort(groups.begin(), groups.end(), [&](const GroupInfo *a, const GroupInfo *b) { return value(*a) > value(*b); });
+    QVariantList result;
+    for (int i = 0; i < groups.size() && i < count; ++i)
+        result.append(QVariantMap{{"name", groups[i]->name}, {"key", groups[i]->key}, {"value", value(*groups[i])},
+                                  {"time", double(moment.time)}});
+    return result;
 }
 
 // The name people know an app by: its desktop entry's, else its own.

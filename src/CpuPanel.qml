@@ -34,6 +34,7 @@ Panel {
             Graph {
                 anchors.fill: parent
                 series: "cpu"
+                blame: "cpu"
                 maximum: 1
                 color: theme.accent
             }

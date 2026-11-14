@@ -44,6 +44,10 @@ class Monitor : public QObject {
     Q_PROPERTY(ProcessModel *processes READ processes CONSTANT)
     Q_PROPERTY(int interval READ interval WRITE setInterval NOTIFY intervalChanged)
     Q_PROPERTY(bool paused READ paused WRITE setPaused NOTIFY pausedChanged)
+    // When the process list shows the past: the moment's time in ms since
+    // the epoch, or 0 while it shows now.
+    Q_PROPERTY(double rewoundTo READ rewoundTo NOTIFY rewindChanged)
+    Q_PROPERTY(double historyStart READ historyStart NOTIFY sampled)
 
 public:
     // How many samples each graph remembers.
@@ -51,6 +55,9 @@ public:
     // so keep enough for a full-screen graph: about four minutes at the
     // default four samples a second.
     static constexpr int HistoryLength = 1024;
+    // How many process scans are kept to rewind to: ten minutes at one a
+    // second.
+    static constexpr int MomentCount = 600;
 
     explicit Monitor(const QString &procRoot = "/proc", const QString &sysRoot = "/sys", QObject *parent = nullptr);
 
@@ -79,6 +86,8 @@ public:
     ProcessModel *processes() { return &m_processes; }
     int interval() const { return m_timer.interval(); }
     bool paused() const { return m_paused; }
+    double rewoundTo() const { return m_rewoundTo; }
+    double historyStart() const { return m_moments.isEmpty() ? 0 : double(m_moments.first().time); }
 
     // A series by name, for graphs to read straight from C++ rather than
     // through a copy into QML on every sample: "cpu", "memory",
@@ -116,6 +125,24 @@ public:
     // An app's name and state for the window: name, frozen, cpuLimit, control.
     Q_INVOKABLE QVariantMap app(const QString &groupKey) const;
 
+    // Rewinding: the process list shows the apps as they were at a moment
+    // in the last ten minutes, so a spike can be traced to whoever caused
+    // it after it's over. Sampling carries on underneath. A time of 0, or
+    // one past the newest scan, returns to now.
+    Q_INVOKABLE void rewindTo(double time);
+    Q_INVOKABLE void rewindBy(double seconds);
+    // The time of a graph sample, counted back from the newest (0), and the
+    // reverse: how many samples are newer than a time. For pointing at
+    // graphs.
+    Q_INVOKABLE double sampleTime(int samplesBack) const;
+    Q_INVOKABLE int samplesSince(double time) const;
+    // The time of the app scan that covers a time, which rewinding goes to.
+    Q_INVOKABLE double momentTime(double time) const;
+    // The apps that used the most of `what` ("cpu", "memory", "read",
+    // "write", "io") at the scan nearest a time: [{name, value}], busiest
+    // first, with the scan's own time as the first entry's "time".
+    Q_INVOKABLE QVariantList blame(double time, const QString &what, int count) const;
+
     // The latest process scan, for the command line.
     const QList<ProcessInfo> &processList() const { return m_processList; }
     const QList<GroupInfo> &groupList() const { return m_groupList; }
@@ -135,6 +162,7 @@ signals:
     void sampled();
     void intervalChanged();
     void pausedChanged();
+    void rewindChanged();
 
 private:
     void sampleCpu();
@@ -210,4 +238,17 @@ private:
     QString m_selfCgroup;
     uint m_uid = 0;
     QSet<QString> m_pausedUnits, m_limitedUnits;
+
+    QList<qint64> m_sampleTimes; // Epoch ms, aligned with every history.
+    struct Moment {
+        qint64 time = 0;
+        QList<GroupInfo> groups;
+        QList<ProcessInfo> processes; // Only the ones worth looking back at.
+    };
+    QList<Moment> m_moments;
+    double m_rewoundTo = 0;
+    int momentAt(double time) const;
+    void recordMoment();
+    QString intern(const QString &text);
+    QSet<QString> m_strings;
 };

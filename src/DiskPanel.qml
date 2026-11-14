@@ -55,6 +55,7 @@ Panel {
                     Layout.minimumHeight: 28
                     series: "disk/" + (disk.info.name || "") + "/read"
                     mirrorSeries: "disk/" + (disk.info.name || "") + "/write"
+                    blame: "io"
                     color: theme.colors.green
                     mirrorColor: theme.colors.red
                 }
