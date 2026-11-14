@@ -1,3 +1,5 @@
+# Maintainer: Christophe Vanlancker <carroarmato0@gmail.com>
+
 pkgname=vitals
 pkgver=0.3.0
 pkgrel=1
@@ -5,8 +7,10 @@ pkgdesc='A system monitor for Omarchy that shows apps, not just processes'
 url='https://github.com/carroarmato0/vitals'
 arch=('x86_64' 'aarch64')
 license=('MIT')
-depends=('qt6-base' 'qt6-declarative' 'qt6-wayland')
-makedepends=('gcc' 'make')
+install='vitals.install'
+options=('!debug')
+depends=('hicolor-icon-theme' 'qt6-base' 'qt6-declarative' 'qt6-wayland' 'systemd')
+makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
 source=()
 sha256sums=()
 
