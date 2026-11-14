@@ -1,0 +1,104 @@
+#!/bin/bash
+# Builds Vitals the way Omarchy's package repository does, in its clean
+# builder container, so a recipe or code change is known to pass there
+# before it reaches a pull request.
+#
+#   bin/package-check                 # this checkout (committed and staged or
+#                                     # changed tracked files), x86_64
+#   bin/package-check --release       # the recipe as published: the GitHub
+#                                     # release tarball of pkgver
+#   bin/package-check --arch aarch64  # emulated; slow
+#
+# It keeps a clone of omacom/omarchy-pkgs in build/omarchy-pkgs, places
+# pkgbuild/omarchy-pkgs/ in it as pkgbuilds/vitals, runs the repository's own
+# recipe checks, then its bin/build with rootless Podman (or Docker, if
+# CONTAINER_ENGINE=docker). The package lands in
+# build/omarchy-pkgs/build-output/edge/<arch>/.
+set -euo pipefail
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+PKGS="$ROOT/build/omarchy-pkgs"
+RECIPE="$ROOT/pkgbuild/omarchy-pkgs"
+RELEASE=false
+ARCH=x86_64
+
+while (($#)); do
+  case "$1" in
+    --release) RELEASE=true; shift ;;
+    --arch) ARCH="$2"; shift 2 ;;
+    -h | --help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "package-check: unknown option $1" >&2; exit 1 ;;
+  esac
+done
+
+fail() { echo "package-check: $*" >&2; exit 1; }
+step() { echo "==> $*"; }
+
+export CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
+command -v "$CONTAINER_ENGINE" >/dev/null || fail "$CONTAINER_ENGINE is not installed"
+"$CONTAINER_ENGINE" info >/dev/null 2>&1 || fail "'$CONTAINER_ENGINE info' fails; is it set up for your user?"
+
+# The version lives in vitals.pro; both recipes must agree with it.
+version=$(sed -n 's/^VERSION = //p' "$ROOT/vitals.pro")
+for recipe in "$RECIPE/PKGBUILD" "$ROOT/pkgbuild/PKGBUILD"; do
+  pkgver=$(sed -n 's/^pkgver=//p' "$recipe")
+  [[ $pkgver == "$version" ]] || fail "${recipe#"$ROOT/"} has pkgver $pkgver, vitals.pro has $version"
+done
+cmp -s "$RECIPE/vitals.install" "$ROOT/pkgbuild/vitals.install" ||
+  fail "pkgbuild/vitals.install and pkgbuild/omarchy-pkgs/vitals.install differ"
+
+step "Updating omacom/omarchy-pkgs in build/omarchy-pkgs"
+if [[ -d $PKGS/.git ]]; then
+  git -C "$PKGS" fetch -q origin master
+else
+  git clone -q https://github.com/omacom/omarchy-pkgs.git "$PKGS"
+fi
+# PR builds use master's tooling, so this does too.
+git -C "$PKGS" checkout -q --detach origin/master
+rm -rf "$PKGS/pkgbuilds/vitals"
+cp -r "$RECIPE" "$PKGS/pkgbuilds/vitals"
+target="$PKGS/pkgbuilds/vitals"
+
+if $RELEASE; then
+  step "Recipe as published: v$version from GitHub"
+  if python3 -c 'import sys; sys.exit(sys.version_info < (3, 14))'; then
+    python3 "$PKGS/helpers/upstream-watch.py" check "$target"
+  else
+    echo "Skipping the upstream watch check: it needs Python 3.14"
+  fi
+else
+  step "Recipe with this checkout as its source"
+  # stash create includes changes to tracked files without touching the
+  # working tree; new files must be added (git add) to be included.
+  tree=$(git -C "$ROOT" stash create)
+  tarball="vitals-$version.tar.gz"
+  git -C "$ROOT" archive --format=tar.gz --prefix="vitals-$version/" -o "$target/$tarball" "${tree:-HEAD}"
+  sum=$(sha256sum "$target/$tarball" | cut -d' ' -f1)
+  sed -i -e "s|^source=.*|source=(\"$tarball\")|" -e "s|^sha256sums=.*|sha256sums=('$sum')|" "$target/PKGBUILD"
+  # Plan without the published channel, so a version already on edge still builds.
+  export OMARCHY_PUBLISHED_REPO_URL=
+fi
+
+step "omarchy-pkgs recipe checks"
+for check in pinned-sources pkgname-unique package-metadata pgp-keys-vendored; do
+  (cd "$PKGS" && "tests/$check.sh" >/dev/null) || fail "tests/$check.sh failed"
+  echo "PASS: $check"
+done
+
+step "Official build: bin/build --package vitals --arch $ARCH ($CONTAINER_ENGINE)"
+(cd "$PKGS" && bin/build --package vitals --arch "$ARCH")
+
+out="$PKGS/build-output/edge/$ARCH"
+package=$(ls "$out"/vitals-"$version"-*-"$ARCH".pkg.tar.zst 2>/dev/null | grep -v -- -debug- | head -1)
+[[ -n $package ]] || fail "no package in ${out#"$ROOT/"}"
+! ls "$out"/vitals-debug-* >/dev/null 2>&1 || fail "a debug package was built; keep options=('!debug')"
+
+step "Checking ${package#"$ROOT/"}"
+owners=$(bsdtar -tvf "$package" | awk '$3 != "root" || $4 != "root" {print $NF}')
+[[ -z $owners ]] || fail "files not owned by root:root: $owners"
+for file in usr/bin/vitals usr/share/applications/vitals.desktop \
+  usr/share/icons/hicolor/scalable/apps/vitals.svg usr/share/licenses/vitals/LICENSE .INSTALL; do
+  bsdtar -tf "$package" "$file" >/dev/null 2>&1 || fail "the package lacks $file"
+done
+echo "PASS: built, tested by check(), files owned by root, no debug package"
+echo "Package: $package"

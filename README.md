@@ -165,7 +165,12 @@ nothing anywhere, and keeps its history in memory.
 bin/build      # build/vitals
 bin/test       # Qt Test, offscreen
 bin/install    # makepkg -fsi: installs the binary, icon, and launcher entry
+bin/package-check   # builds and tests it in Omarchy's package builder (rootless Podman)
 ```
+
+The recipe for [Omarchy's package repository](https://github.com/omacom/omarchy-pkgs)
+lives in `pkgbuild/omarchy-pkgs/`; `bin/package-check --release` builds it
+exactly as published.
 
 The screenshots come from a made-up system, so they show nothing of the machine
 they were taken on. `tools/demo/vitals-demo.py ROOT` writes a stand-in `/proc`

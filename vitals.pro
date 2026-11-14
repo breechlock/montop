@@ -4,6 +4,10 @@ CONFIG += c++17 release
 TARGET = vitals
 TEMPLATE = app
 
+# The one place the version is set; a release also sets pkgver in the PKGBUILDs.
+VERSION = 0.3.0
+DEFINES += VITALS_VERSION=\\\"$$VERSION\\\"
+
 HEADERS += \
     src/apps.h \
     src/cli.h \
