@@ -11,6 +11,7 @@
 
 #include "cli.h"
 #include "monitor.h"
+#include "version.h"
 #include "sparkline.h"
 #include "theme.h"
 #include "translator.h"

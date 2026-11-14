@@ -1,7 +1,7 @@
 # Maintainer: Christophe Vanlancker <carroarmato0@gmail.com>
 
 pkgname=vitals
-pkgver=0.3.1
+pkgver=0.4.0
 pkgrel=1
 pkgdesc='A system monitor for Omarchy that shows apps, not just processes'
 arch=('x86_64' 'aarch64')
