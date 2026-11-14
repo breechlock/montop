@@ -66,7 +66,7 @@ Vitals isn't in Omarchy's package repository yet. To build and install it from
 source on Omarchy (everything it needs is already there):
 
 ```sh
-git clone <this repository>
+git clone https://github.com/carroarmato0/vitals.git
 cd vitals
 bin/install    # builds, then installs the package with pacman (asks for sudo)
 ```
