@@ -18,7 +18,7 @@ Rectangle {
         ["?", qsTr("Show or hide shortcuts")],
         ["Space", qsTr("Pause or resume updates")],
         ["+ / −", qsTr("Update less or more often")],
-        ["1 – 5", qsTr("Show or hide CPU, memory, disks, network, processes")],
+        ["1 – 6", qsTr("Show or hide CPU, memory, disks, network, processes, GPU")],
         ["a", qsTr("Show apps or every process")],
         ["↑ ↓  j k", qsTr("Select an app or process")],
         ["→ ←  l h  Enter", qsTr("Open or close an app")],

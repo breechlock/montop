@@ -5,10 +5,12 @@
 #include <QList>
 #include <QObject>
 #include <QSet>
+#include <memory>
 #include <optional>
 #include <QTimer>
 #include <QVariantList>
 
+#include "gpu.h"
 #include "processmodel.h"
 #include "apps.h"
 #include "procfs.h"
@@ -40,6 +42,10 @@ class Monitor : public QObject {
     Q_PROPERTY(QVariantList filesystems READ filesystems NOTIFY sampled)
     Q_PROPERTY(QVariantList networks READ networks NOTIFY sampled)
     Q_PROPERTY(int taskCount READ taskCount NOTIFY sampled)
+    // [{name, driver, asleep, busy, memoryUsed, memoryTotal, appMemory, mhz,
+    // temperature, watts, fan, note}], one per GPU; -1 where it's unknown.
+    Q_PROPERTY(QVariantList gpus READ gpus NOTIFY sampled)
+    Q_PROPERTY(bool gpuPerApp READ gpuPerApp NOTIFY sampled)
     Q_PROPERTY(QString error READ error NOTIFY sampled)
     Q_PROPERTY(ProcessModel *processes READ processes CONSTANT)
     Q_PROPERTY(int interval READ interval WRITE setInterval NOTIFY intervalChanged)
@@ -82,6 +88,11 @@ public:
     QVariantList filesystems() const { return m_filesystems; }
     QVariantList networks() const { return m_networks; }
     int taskCount() const { return m_taskCount; }
+    QVariantList gpus() const;
+    bool gpuPerApp() const { return m_gpus->perApp(); }
+    const QList<gpu::Device> &gpuDevices() const { return m_gpus->devices(); }
+    // Tests stand in for NVIDIA's library.
+    void setNvml(std::unique_ptr<gpu::Nvml> nvml) { m_gpus->setNvml(std::move(nvml)); }
     QString error() const { return m_error; }
     ProcessModel *processes() { return &m_processes; }
     int interval() const { return m_timer.interval(); }
@@ -91,7 +102,8 @@ public:
 
     // A series by name, for graphs to read straight from C++ rather than
     // through a copy into QML on every sample: "cpu", "memory",
-    // "disk/<name>/read", "disk/<name>/write", "net/<name>/rx", "net/<name>/tx".
+    // "disk/<name>/read", "disk/<name>/write", "net/<name>/rx", "net/<name>/tx",
+    // "gpu/<index>".
     QList<qreal> history(const QString &series) const { return m_history.value(series); }
 
     void setInterval(int ms);
@@ -139,7 +151,7 @@ public:
     // The time of the app scan that covers a time, which rewinding goes to.
     Q_INVOKABLE double momentTime(double time) const;
     // The apps that used the most of `what` ("cpu", "memory", "read",
-    // "write", "io") at the scan nearest a time: [{name, value}], busiest
+    // "write", "io", "gpu") at the scan nearest a time: [{name, value}], busiest
     // first, with the scan's own time as the first entry's "time".
     Q_INVOKABLE QVariantList blame(double time, const QString &what, int count) const;
 
@@ -172,6 +184,11 @@ private:
     void sampleDisks(double seconds);
     void sampleFilesystems();
     void sampleNetworks(double seconds);
+    void sampleGpus();
+    // Adds a process's GPU clients, from its fdinfo, to its usage.
+    void sampleGpuClients(const QString &base, ProcessInfo &p, bool known, double seconds,
+                          QHash<QString, QHash<QString, double>> &shares, QHash<QString, quint64> &memory,
+                          QHash<QString, gpu::Client> &clients);
     void tick();
     void sampleSystem();
     void sampleProcessTable();
@@ -234,6 +251,18 @@ private:
     QSet<QString> m_physicalDevices; // "major:minor" of the disks listed.
     std::optional<apps::DesktopNames> m_desktopNames;
     QHash<QString, QString> m_groupNames;
+
+    std::unique_ptr<gpu::Gpus> m_gpus;
+    // Per PID, its open GPU files as (fd, node). Listing every fd of every
+    // process is what makes this costly, so a process is listed while it's
+    // new, then every few scans if it uses the GPU, and rarely if not.
+    struct GpuFds {
+        QList<QPair<int, QString>> fds;
+        int listed = 0;
+    };
+    QHash<int, GpuFds> m_gpuFds;
+    QHash<QString, gpu::Client> m_prevClients; // By device and client id.
+    int m_scanCount = 0;
     long m_pageSize = 4096;
 
     QString m_systemctl = "systemctl";

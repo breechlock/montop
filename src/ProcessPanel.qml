@@ -128,6 +128,7 @@ Panel {
         { title: qsTr("User"), sort: ProcessModel.User, width: 80, right: false },
         { title: qsTr("Thr"), sort: ProcessModel.Threads, width: 36, right: true },
         { title: qsTr("CPU%"), sort: ProcessModel.Cpu, width: 56, right: true },
+        { title: qsTr("GPU%"), sort: ProcessModel.Gpu, width: 56, right: true },
         { title: qsTr("Memory"), sort: ProcessModel.Memory, width: 76, right: true },
         { title: qsTr("Read/s"), sort: ProcessModel.Read, width: 92, right: true },
         { title: qsTr("Write/s"), sort: ProcessModel.Write, width: 92, right: true },
@@ -139,8 +140,9 @@ Panel {
     // the footer shows the selected one in full anyway.
     readonly property var shown: {
         const available = list.width - 12
-        const dropOrder = [2, 4, 8, 7, 3]
-        const visible = columns.map(() => true)
+        const dropOrder = [2, 6, 4, 9, 8, 3]
+        // GPU% only where a GPU says which app uses it.
+        const visible = columns.map((c, i) => i !== 6 || monitor.gpuPerApp)
         const needed = () => columns.reduce((sum, c, i) => visible[i] ? sum + (c.width > 0 ? c.width : commandMinimum) + spacing : sum, -spacing)
         for (const index of dropOrder) {
             if (needed() <= available)
@@ -250,6 +252,7 @@ Panel {
                 required property string user
                 required property int threads
                 required property real cpu
+                required property real gpu
                 required property real memory
                 required property real readRate
                 required property real writeRate
@@ -328,18 +331,26 @@ Panel {
                         color: row.cpu >= 80 ? theme.colors.red : row.cpu >= 25 ? theme.colors.yellow
                              : row.cpu >= 1 ? row.text : row.quiet
                     }
-                    Label { width: root.columnWidth(6); visible: root.shown[6]; horizontalAlignment: Text.AlignRight; text: monitor.bytes(row.memory); color: row.text }
                     Label {
-                        width: root.columnWidth(7)
-                        visible: root.shown[7]
+                        width: root.columnWidth(6)
+                        visible: root.shown[6]
+                        horizontalAlignment: Text.AlignRight
+                        text: root.number(row.gpu, 1)
+                        color: row.gpu >= 80 ? theme.colors.red : row.gpu >= 25 ? theme.colors.yellow
+                             : row.gpu >= 1 ? row.text : row.quiet
+                    }
+                    Label { width: root.columnWidth(7); visible: root.shown[7]; horizontalAlignment: Text.AlignRight; text: monitor.bytes(row.memory); color: row.text }
+                    Label {
+                        width: root.columnWidth(8)
+                        visible: root.shown[8]
                         horizontalAlignment: Text.AlignRight
                         // A dash, not zero, where the kernel won't tell us.
                         text: row.readRate < 0 ? "–" : row.readRate === 0 ? "0" : monitor.rate(row.readRate)
                         color: row.readRate > 0 ? theme.colors.green : row.quiet
                     }
                     Label {
-                        width: root.columnWidth(8)
-                        visible: root.shown[8]
+                        width: root.columnWidth(9)
+                        visible: root.shown[9]
                         horizontalAlignment: Text.AlignRight
                         text: row.writeRate < 0 ? "–" : row.writeRate === 0 ? "0" : monitor.rate(row.writeRate)
                         color: row.writeRate > 0 ? theme.colors.red : row.quiet

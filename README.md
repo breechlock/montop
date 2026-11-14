@@ -59,6 +59,12 @@ The package ships the skill in `/usr/share/vitals/skills/vitals`, and
 Codex, Pi, Gemini, Hermes), so it stays current with every upgrade.
 `vitals skill remove` takes the links out again.
 
+**The GPU too, app by app.** Next to the CPU, every GPU shows how busy it is,
+its memory, clock, temperature, and power, and the app list gains a GPU%
+column: the browser decoding a video, the compositor, a game. Pointing at the
+GPU graph names the apps behind a spike, as it does for the CPU. A discrete GPU
+that's powered down stays asleep: Vitals reads nothing that would wake it.
+
 **At home on Omarchy.** Vitals follows the current theme live, the whole
 palette, light or dark, along with Hyprland's window rounding, the desktop's
 monospace font, and the language picked under Setup > Language.
@@ -80,7 +86,7 @@ Then open it from the app launcher (`Super + Space`, Vitals), or run
 `vitals open`.
 
 On another Arch-based system you need `qt6-base`, `qt6-declarative`,
-`qt6-wayland`, `make`, and a C++17 compiler. Vitals reads Linux's `/proc` and
+`qt6-wayland`, `hwdata` (for GPU names), `make`, and a C++17 compiler. Vitals reads Linux's `/proc` and
 `/sys` and uses systemd's cgroups for apps, pausing, and limiting; it runs
 anywhere with cgroups v2, and falls back to plain processes without them.
 
@@ -101,7 +107,7 @@ anywhere with cgroups v2, and falls back to plain processes without them.
 | `x` / `Shift X` | End (SIGTERM) or kill (SIGKILL) the selected app or process, after asking |
 | `Space` | Pause or resume updates |
 | `+` / `-` | Sample less or more often (0.125 s to 4 s; 0.25 s by default) |
-| `1` – `5` | Show or hide CPU, memory, disks, network, apps |
+| `1` – `6` | Show or hide CPU, memory, disks, network, apps, GPU |
 | `PgUp` `PgDn` / `g` `G` | Move a page / go to the first or last row |
 | `Shift K` | Show or hide kernel threads |
 | `q` | Quit |
@@ -113,7 +119,7 @@ shows 200.
 
 ```sh
 vitals snapshot                 # CPU, memory, disks, network, busiest apps and processes
-vitals snapshot --json --sort memory --top 20
+vitals snapshot --json --sort gpu --top 20
 vitals apps --json              # every app and service, with its PIDs and top processes
 vitals pause steam              # freeze an app until: vitals resume steam
 vitals limit omacut 200         # cap it at two cores until logout; vitals limit omacut off
@@ -147,6 +153,27 @@ in charge. Vitals acts only on your apps (`app.slice`) and background services
 (the compositor, D-Bus, audio, portals), since freezing those would freeze the
 session; system services, which need root; and the app Vitals itself runs in,
 such as the terminal you started it from.
+
+**GPUs.** Each driver reports differently, and Vitals takes what each offers:
+
+| GPU | Busy | Per app | Memory, clock, sensors |
+| --- | --- | --- | --- |
+| AMD (`amdgpu`) | the driver's own busy counter | yes | VRAM, clock, temperature, power, fan |
+| Intel (`i915`, `xe`) | its busiest engine | yes | clock; sensors on discrete cards |
+| NVIDIA (proprietary driver) | through NVIDIA's NVML library, loaded if installed | yes | VRAM, clock, temperature, power, fan |
+| Snapdragon (Adreno), Mali | its busiest engine | yes | clock |
+| Apple Silicon (Asahi Linux) | not reported by its driver | no | none |
+
+Per-app usage comes from the kernel's per-client counters in
+`/proc/<pid>/fdinfo` (NVML for NVIDIA), so it covers your own processes. A GPU%
+is of one GPU, as CPU% is of one core. On a GPU that shares memory with the CPU,
+the memory shown is what the apps' GPU buffers hold.
+
+**Arm and Macs.** Vitals builds and runs its tests on Arm (`aarch64`) in CI. On
+Arm, the CPU panel names the machine (`Apple MacBook Air (M2, 2022)`) or the
+chip (`Snapdragon X1E80100`), and reads the CPU temperature from the SoC's
+thermal zones; Apple's chips report none on Linux, so none is shown. Intel Macs
+are ordinary Intel or AMD hardware to Vitals.
 
 **Measuring a command.** `vitals run` starts the command in a systemd scope of
 its own, so its cgroup counts everything it starts. Peak memory is what the

@@ -12,7 +12,8 @@ specific to Vitals.
 
 ## Layout
 
-- `src/` flat: `monitor.*` (sampling, rewind, pause/limit), `processmodel.*`
+- `src/` flat: `monitor.*` (sampling, rewind, pause/limit), `gpu.*` (GPU
+  devices, fdinfo parsing, NVML), `processmodel.*`
   (rows and roles for QML), `procfs.*` (parsers), `apps.*` (cgroups and
   desktop names), `run.*` (`vitals run`), `cli.*` (commands), `theme.*`,
   `translator.*`, QML panels, `i18n/{en,nl}.json`.
@@ -54,6 +55,25 @@ specific to Vitals.
   user's machine: `tools/demo/screenshots.py` under
   `systemd-inhibit --what=idle`, hands off the mouse for four minutes.
 - Commit messages are short and imperative.
+
+## GPUs
+
+- Devices are `/sys/class/drm/card*` that have a render node; per-driver
+  readers live in `Gpus::sampleDevice` (`src/gpu.cpp`). Per-app usage comes
+  from `/proc/<pid>/fdinfo` (`drm-engine-*` ns, or `drm-cycles-*` over
+  `drm-total-cycles-*` for xe), de-duplicated by device and `drm-client-id`,
+  in `Monitor::sampleGpuClients`. NVIDIA's proprietary driver reports only
+  through NVML, loaded with `dlopen` behind the `gpu::Nvml` interface.
+- Never wake a sleeping GPU: when `power/runtime_status` is `suspended`, read
+  nothing else for it, NVML included.
+- Keep the scan cheap: fd lists are cached per PID and re-listed adaptively
+  (new processes, then every 15th scan for GPU users, 30th for the rest).
+  Measure with a harness before and after changing it; it costs about 0.5 ms
+  per scan on a desktop with 330 processes.
+- Hardware without a test machine is covered by sysfs/fdinfo fixtures in
+  `tests/vitals_tests.cpp` (`readsGpuDevices`, `monitorPutsGpuUsageDownToApps`,
+  `namesArmMachines`). Apple Silicon (Asahi) reports no GPU usage and no CPU
+  temperature; the window says so rather than showing zeros.
 
 ## Version and release
 

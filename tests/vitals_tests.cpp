@@ -11,12 +11,28 @@
 #include "apps.h"
 #include "run.h"
 #include "cli.h"
+#include "gpu.h"
 #include "monitor.h"
 #include "processmodel.h"
 #include "procfs.h"
 #include "sparkline.h"
 #include "theme.h"
 #include "translator.h"
+
+// Stands in for NVIDIA's library.
+class FakeNvml : public gpu::Nvml {
+public:
+    int calls = 0;
+    void *device(const QString &pci) override { ++calls; return pci == "0000:01:00.0" ? this : nullptr; }
+    QString name(void *) override { return "GeForce GTX 1080"; }
+    double busy(void *) override { return 0.42; }
+    bool memory(void *, double &used, double &total) override { used = 1 << 30; total = 8.0 * (1 << 30); return true; }
+    double temperature(void *) override { return 49; }
+    double watts(void *) override { return 9.8; }
+    double mhz(void *) override { return 1733; }
+    double fan(void *) override { return 35; }
+    QHash<int, gpu::ProcessUsage> processes(void *) override { return {{4398, {12.5, 221 << 20}}}; }
+};
 
 class VitalsTests : public QObject {
     Q_OBJECT
@@ -413,6 +429,180 @@ private slots:
         QCOMPARE(model->data(model->index(model->rowOf("g:app:build")), ProcessModel::CpuRole).toDouble(), 0.0);
     }
 
+    void parsesGpuClients()
+    {
+        gpu::Client before, now;
+        QVERIFY(!gpu::parseFdinfo("pos:\t0\nflags:\t02\n", before));
+        // i915: engine time in ns, memory per region, video engines in twos.
+        QVERIFY(gpu::parseFdinfo("pos:\t0\ndrm-driver:\ti915\ndrm-client-id:\t6\ndrm-pdev:\t0000:00:02.0\n"
+                                 "drm-total-system0:\t8192\ndrm-resident-system0:\t4096\n"
+                                 "drm-engine-render:\t1000000000 ns\ndrm-engine-video:\t0 ns\ndrm-engine-capacity-video:\t2\n", before));
+        QCOMPARE(before.driver, QString("i915"));
+        QCOMPARE(before.id, QString("6"));
+        QCOMPARE(before.memory, quint64(4096)); // Resident only, not total.
+        QCOMPARE(before.capacity.value("video"), quint64(2));
+        QVERIFY(gpu::parseFdinfo("drm-driver:\ti915\ndrm-client-id:\t6\ndrm-resident-system0:\t4096\n"
+                                 "drm-engine-render:\t1250000000 ns\ndrm-engine-video:\t500000000 ns\ndrm-engine-capacity-video:\t2\n", now));
+        const QHash<QString, double> shares = gpu::engineShares(before, now, 1.0);
+        QCOMPARE(shares.value("render"), 0.25);
+        QCOMPARE(shares.value("video"), 0.25); // Half a second over two engines.
+
+        // amdgpu's older memory keys, in KiB.
+        gpu::Client amd;
+        QVERIFY(gpu::parseFdinfo("drm-driver:\tamdgpu\ndrm-memory-vram:\t2048 KiB\ndrm-memory-gtt: \t1024 KiB\n"
+                                 "drm-engine-gfx:\t5 ns\n", amd));
+        QCOMPARE(amd.memory, quint64(3 << 20));
+
+        // xe: busy cycles over the GPU's own, no time at all.
+        gpu::Client xeBefore, xeNow;
+        QVERIFY(gpu::parseFdinfo("drm-driver:\txe\ndrm-cycles-rcs:\t100\ndrm-total-cycles-rcs:\t1000\n", xeBefore));
+        QVERIFY(gpu::parseFdinfo("drm-driver:\txe\ndrm-cycles-rcs:\t400\ndrm-total-cycles-rcs:\t2000\n", xeNow));
+        QCOMPARE(gpu::engineShares(xeBefore, xeNow, 0.5).value("rcs"), 0.3);
+    }
+
+    void readsGpuDevices()
+    {
+        QTemporaryDir dir;
+        const QString sys = dir.filePath("sys");
+        write(dir.filePath("pci.ids"), "# ids\n10de  NVIDIA Corporation\n\t1b80  GP104 [GeForce GTX 1080]\n"
+                                       "8086  Intel Corporation\n\t46a8  Alder Lake-UP3 GT2 [Iris Xe Graphics]\n");
+        // A display controller only (no render node): not a GPU to list.
+        gpuDevice(sys, "simple-framebuffer.0", 0, 0, "DRIVER=simple-framebuffer\n");
+        // An AMD card with its own counters and sensors.
+        const QString amd = gpuDevice(sys, "pci0000:00/0000:03:00.0", 1, 128, "DRIVER=amdgpu\nPCI_SLOT_NAME=0000:03:00.0\n");
+        write(amd + "/product_name", "AMD Radeon RX 7600\n");
+        write(amd + "/gpu_busy_percent", "37\n");
+        write(amd + "/mem_info_vram_used", "1073741824\n");
+        write(amd + "/mem_info_vram_total", "8589934592\n");
+        write(amd + "/hwmon/hwmon4/temp1_input", "54000\n");
+        write(amd + "/hwmon/hwmon4/power1_average", "23500000\n");
+        write(amd + "/hwmon/hwmon4/freq1_input", "2400000000\n");
+        // An NVIDIA card asleep, and one awake, both through the fake NVML.
+        const QString sleeping = gpuDevice(sys, "pci0000:00/0000:02:00.0", 2, 129, "DRIVER=nvidia\nPCI_SLOT_NAME=0000:02:00.0\n");
+        write(sleeping + "/power/runtime_status", "suspended\n");
+        const QString nvidia = gpuDevice(sys, "pci0000:00/0000:01:00.0", 3, 130, "DRIVER=nvidia\nPCI_SLOT_NAME=0000:01:00.0\n");
+        write(nvidia + "/vendor", "0x10de\n");
+        write(nvidia + "/device", "0x1b80\n");
+        write(nvidia + "/power/runtime_status", "active\n");
+        // Apple's GPU on Asahi Linux, which reports no usage.
+        gpuDevice(sys, "platform/soc/206400000.gpu", 4, 131, "DRIVER=asahi\n");
+
+        gpu::Gpus gpus(sys, dir.filePath("pci.ids"));
+        auto *fake = new FakeNvml;
+        gpus.setNvml(std::unique_ptr<gpu::Nvml>(fake));
+        gpus.sample(1000);
+        const QList<gpu::Device> &devices = gpus.devices();
+        QCOMPARE(devices.size(), 4);
+
+        const gpu::Device &radeon = devices[0];
+        QCOMPARE(radeon.name, QString("AMD Radeon RX 7600"));
+        QCOMPARE(radeon.busy, 0.37);
+        QCOMPARE(radeon.memoryTotal, 8589934592.0);
+        QCOMPARE(radeon.temperature, 54.0);
+        QCOMPARE(radeon.watts, 23.5);
+        QCOMPARE(radeon.mhz, 2400.0);
+        QVERIFY(radeon.perApp);
+
+        // Asleep: nothing read, NVML not even asked.
+        QVERIFY(devices[1].asleep);
+        QCOMPARE(devices[1].busy, -1.0);
+        QCOMPARE(devices[1].name, QString("NVIDIA GPU")); // No PCI id to look up.
+
+        const gpu::Device &geforce = devices[2];
+        QCOMPARE(fake->calls, 1);
+        QCOMPARE(geforce.name, QString("NVIDIA GeForce GTX 1080"));
+        QCOMPARE(geforce.busy, 0.42);
+        QCOMPARE(geforce.memoryUsed, double(1 << 30));
+        QCOMPARE(geforce.fan, 35.0);
+        QVERIFY(geforce.perApp);
+        const auto usage = gpus.nvidiaProcesses();
+        QCOMPARE(usage.value(4398).percent, 12.5);
+        QCOMPARE(usage.value(4398).memory, quint64(221 << 20));
+
+        const gpu::Device &apple = devices[3];
+        QCOMPARE(apple.name, QString("Apple GPU"));
+        QCOMPARE(apple.busy, -1.0);
+        QVERIFY(!apple.perApp);
+        QVERIFY(!apple.note.isEmpty());
+
+        // Without NVML, an NVIDIA card says why it shows nothing.
+        gpu::Gpus bare(sys, dir.filePath("pci.ids"));
+        bare.setNvml(nullptr);
+        bare.sample(1000);
+        QVERIFY(!bare.devices()[2].note.isEmpty());
+        QVERIFY(!bare.devices()[2].perApp);
+        QCOMPARE(bare.devices()[2].name, QString("NVIDIA GeForce GTX 1080")); // From the PCI ids.
+    }
+
+    void monitorPutsGpuUsageDownToApps()
+    {
+        QTemporaryDir root;
+        const QString proc = root.filePath("proc"), sys = root.filePath("sys");
+        const QString scope = "/user.slice/user-1000.slice/user@1000.service/app.slice/app-Hyprland-game-1a2b.scope";
+        write(proc + "/meminfo", "MemTotal: 1000 kB\nMemAvailable: 600 kB\n");
+        write(proc + "/stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n");
+        const QString intel = gpuDevice(sys, "pci0000:00/0000:00:02.0", 1, 128, "DRIVER=i915\nPCI_SLOT_NAME=0000:00:02.0\n");
+        write(sys + "/class/drm/card1/gt_act_freq_mhz", "1100\n");
+        // Two processes holding the same client (an inherited fd), and one
+        // with a client of its own that doesn't use the GPU.
+        auto fdinfo = [](int client, quint64 ns) {
+            return QString("pos:\t0\ndrm-driver:\ti915\ndrm-client-id:\t%1\ndrm-resident-system0:\t1048576\n"
+                           "drm-engine-render:\t%2 ns\n").arg(client).arg(ns).toUtf8();
+        };
+        for (int pid : {100, 101, 102}) {
+            write(proc + QString("/%1/stat").arg(pid), pidStat(pid, pid == 102 ? "idle" : "game", 0));
+            write(proc + QString("/%1/cgroup").arg(pid), "0::" + scope.toUtf8() + "\n");
+            QDir().mkpath(proc + QString("/%1/fd").arg(pid));
+            QFile::link("/dev/dri/renderD128", proc + QString("/%1/fd/5").arg(pid));
+            write(proc + QString("/%1/fdinfo/5").arg(pid), fdinfo(pid == 102 ? 9 : 7, 0));
+        }
+        Monitor monitor(proc, sys);
+        QCOMPARE(monitor.gpus().size(), 1);
+        QCOMPARE(monitor.gpus().first().toMap()["name"].toString(), QString("Intel GPU")); // No PCI ids here.
+
+        // Ten seconds of engine time in a fraction of one: fully busy.
+        write(proc + "/100/fdinfo/5", fdinfo(7, 10000000000ULL));
+        write(proc + "/101/fdinfo/5", fdinfo(7, 10000000000ULL));
+        QTest::qWait(100);
+        monitor.sample();
+
+        const GroupInfo g = monitor.groupList().first();
+        QCOMPARE(g.gpu, 100.0); // The shared client counts once, not twice.
+        QCOMPARE(g.gpuMemory, quint64(2 << 20));
+        const QVariantMap device = monitor.gpus().first().toMap();
+        QCOMPARE(device["busy"].toDouble(), 1.0);
+        QCOMPARE(device["appMemory"].toDouble(), double(2 << 20));
+        QCOMPARE(device["mhz"].toDouble(), 1100.0);
+        QVERIFY(monitor.gpuPerApp());
+        QCOMPARE(monitor.blame(monitor.sampleTime(0), "gpu", 3).first().toMap()["value"].toDouble(), 100.0);
+
+        const QJsonObject snapshot = snapshotJson(monitor, 5, "gpu");
+        QCOMPARE(snapshot["gpus"].toArray().first().toObject()["busy_percent"].toDouble(), 100.0);
+        QCOMPARE(snapshot["apps"].toArray().first().toObject()["gpu_percent"].toDouble(), 100.0);
+    }
+
+    void namesArmMachines()
+    {
+        QTemporaryDir root;
+        const QString proc = root.filePath("proc"), sys = root.filePath("sys");
+        write(proc + "/meminfo", "MemTotal: 1000 kB\nMemAvailable: 600 kB\n");
+        write(proc + "/stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n");
+        write(proc + "/cpuinfo", "processor\t: 0\nBogoMIPS\t: 48.00\nCPU implementer\t: 0x61\n");
+        write(sys + "/firmware/devicetree/base/model", QByteArray("Apple MacBook Air (13-inch, M2, 2022)\0", 38));
+        write(sys + "/class/thermal/thermal_zone0/type", "battery\n");
+        write(sys + "/class/thermal/thermal_zone1/type", "cpu0-thermal\n");
+        write(sys + "/class/thermal/thermal_zone1/temp", "47500\n");
+        Monitor apple(proc, sys);
+        QCOMPARE(apple.cpuModel(), QString("Apple MacBook Air (13-inch, M2, 2022)"));
+        QCOMPARE(apple.cpuTemperature(), 47.5);
+
+        QFile::remove(sys + "/firmware/devicetree/base/model");
+        write(sys + "/devices/soc0/family", "Snapdragon\n");
+        write(sys + "/devices/soc0/machine", "X1E80100\n");
+        Monitor snapdragon(proc, sys);
+        QCOMPARE(snapdragon.cpuModel(), QString("Snapdragon X1E80100"));
+    }
+
     void linksAndRemovesTheSkill()
     {
         QTemporaryDir dir;
@@ -639,6 +829,21 @@ private:
     {
         return QByteArray::number(pid) + " (" + comm + ") R 1 1 1 0 -1 0 0 0 0 0 " + QByteArray::number(ticks)
                + " 0 0 0 20 0 1 0 100 1000 10";
+    }
+
+    // A GPU in a stand-in sysfs: its device directory, and the card and
+    // render nodes that point at it.
+    static QString gpuDevice(const QString &sys, const QString &device, int card, int render, const QByteArray &uevent)
+    {
+        const QString path = sys + "/devices/" + device;
+        write(path + "/uevent", uevent);
+        QDir().mkpath(sys + QString("/class/drm/card%1").arg(card));
+        QFile::link(path, sys + QString("/class/drm/card%1/device").arg(card));
+        if (render > 0) {
+            QDir().mkpath(sys + QString("/class/drm/renderD%1").arg(render));
+            QFile::link(path, sys + QString("/class/drm/renderD%1/device").arg(render));
+        }
+        return path;
     }
 
     static void write(const QString &path, const QByteArray &contents)

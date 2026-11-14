@@ -1,10 +1,11 @@
 ---
 name: vitals
 description: |
-  See what a Linux machine is doing with Vitals: CPU, memory, disks, network,
-  and which apps and processes are using them. Use for ANY question about why
-  the computer is slow, hot, loud, out of memory, or out of disk space, what is
-  using the CPU, memory, disk, or network, or whether something is running.
+  See what a Linux machine is doing with Vitals: CPU, GPU, memory, disks,
+  network, and which apps and processes are using them. Use for ANY question
+  about why the computer is slow, hot, loud, out of memory, or out of disk
+  space, what is using the CPU, GPU, memory, disk, or network, or whether
+  something is running.
 ---
 
 # Vitals
@@ -17,9 +18,9 @@ needs a display.
 ## Workflow
 
 1. Start with `vitals snapshot --json`. It samples twice, a second apart, and
-   prints CPU (total, per core, frequency, temperature, load), memory, disks,
-   filesystems, network, and the ten busiest apps and processes.
-   - `--sort memory|read|write` ranks by something else than CPU.
+   prints CPU (total, per core, frequency, temperature, load), GPUs, memory,
+   disks, filesystems, network, and the ten busiest apps and processes.
+   - `--sort memory|read|write|gpu` ranks by something else than CPU.
    - `--top N` lists more (0 lists all); `--interval MS` measures rates over a
      longer window, which helps when the load comes and goes.
 2. For the full picture of what is running, `vitals apps --json` lists every
@@ -53,6 +54,15 @@ command's own code. Use it to answer "how much memory does this build need",
   `memory.available_bytes` is what is really free.
 - A `null` rate means the kernel did not let this user read it (another user's
   process). Say so rather than reading it as zero.
+- `gpus` lists every GPU with what its driver reports: `busy_percent`, its
+  own memory (`memory_used_bytes` of `memory_total_bytes`) or, for a GPU that
+  shares RAM, what apps' GPU buffers hold (`app_memory_bytes`), and clock,
+  temperature, power, and fan where known. `asleep: true` is a discrete GPU
+  powered down because nothing uses it: that is normal, not a fault. A `note`
+  says why numbers are missing (Apple's GPU on Asahi Linux reports none).
+- `gpu_percent` on apps and processes is of one GPU, from each driver's
+  per-client counters (NVIDIA's through NVML); it's there when `per_app` is
+  true for a GPU. Video playback and encoding show up here too.
 - `kind` tells apps the person launched (`app`) from their own background
   services (`service`), system services (`system`), and the kernel.
 

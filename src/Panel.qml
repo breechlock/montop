@@ -59,6 +59,8 @@ Item {
         Label {
             id: detailLabel
             x: 6
+            // Never over the title: a long detail gives way with an ellipsis.
+            width: Math.max(0, Math.min(implicitWidth, panel.width - titleRow.width - 66))
             text: panel.detail
             color: panel.detailColor
             elide: Text.ElideRight

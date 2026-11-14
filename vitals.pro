@@ -11,6 +11,7 @@ DEFINES += VITALS_VERSION=\\\"$$VERSION\\\"
 HEADERS += \
     src/apps.h \
     src/cli.h \
+    src/gpu.h \
     src/procfs.h \
     src/run.h \
     src/monitor.h \
@@ -23,6 +24,7 @@ SOURCES += \
     src/main.cpp \
     src/apps.cpp \
     src/cli.cpp \
+    src/gpu.cpp \
     src/run.cpp \
     src/procfs.cpp \
     src/monitor.cpp \

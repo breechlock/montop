@@ -31,6 +31,9 @@ Panel {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.preferredWidth: 0
+                        // The model gives way first; in a very narrow column
+                        // the name is cut short rather than run under the rates.
+                        clip: true
                         spacing: 8
                         Label { text: disk.info.name || ""; color: theme.colors.bright_foreground }
                         Label {
@@ -45,8 +48,12 @@ Panel {
                     Label { text: "▲ " + monitor.rate(disk.info.readRate || 0); color: theme.colors.green }
                     Label { text: "▼ " + monitor.rate(disk.info.writeRate || 0); color: theme.colors.red }
                     Label {
+                        // Gives way, with an ellipsis, when the rates need the room.
+                        Layout.minimumWidth: 0
+                        Layout.preferredWidth: implicitWidth
                         text: qsTr("%1% busy").arg(Math.round((disk.info.busy || 0) * 100))
                         color: theme.colors.dark_foreground
+                        elide: Text.ElideRight
                     }
                 }
                 Graph {

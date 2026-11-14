@@ -21,6 +21,9 @@ struct ProcessInfo {
     double readRate = -1;
     double writeRate = -1;
     bool kernel = false;
+    // Percent of one GPU, like CPU% of one core, and what its GPU buffers hold.
+    double gpu = 0;
+    quint64 gpuMemory = 0;
 };
 
 // One app: every process in the cgroups that belong to it.
@@ -45,6 +48,8 @@ struct GroupInfo {
     QString control;
     bool frozen = false;
     double cpuLimit = 0; // Percent of one core, like cpu; 0 for none.
+    double gpu = 0;
+    quint64 gpuMemory = 0;
 };
 
 // The process table, as apps with their processes beneath them or as a flat
@@ -64,7 +69,7 @@ class ProcessModel : public QAbstractListModel {
     Q_PROPERTY(bool grouped READ grouped WRITE setGrouped NOTIFY groupedChanged)
 
 public:
-    enum Column { Pid, Name, User, Cpu, Memory, Read, Write, Threads };
+    enum Column { Pid, Name, User, Cpu, Memory, Read, Write, Threads, Gpu };
     Q_ENUM(Column)
 
     enum Role {
@@ -92,6 +97,8 @@ public:
         FrozenRole,
         CpuLimitRole,
         ControlRole,
+        GpuRole,
+        GpuMemoryRole,
     };
 
     explicit ProcessModel(QObject *parent = nullptr);
@@ -113,6 +120,8 @@ public:
     void setFilter(const QString &filter);
     void setShowKernelThreads(bool show);
     void setGrouped(bool grouped);
+    // Whether any GPU reports usage per app; without it, sorting skips GPU.
+    void setGpuAvailable(bool available) { m_gpuAvailable = available; }
 
     // Clicking a header sorts by it; clicking the same header again flips it.
     Q_INVOKABLE void sortBy(Column column);
@@ -163,4 +172,5 @@ private:
     QString m_filter;
     bool m_showKernel = false;
     bool m_grouped = true;
+    bool m_gpuAvailable = false;
 };

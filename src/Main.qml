@@ -25,6 +25,8 @@ ApplicationWindow {
     property bool showDisks: true
     property bool showNetwork: true
     property bool showProcesses: true
+    property bool showGpu: true
+    readonly property bool gpuShown: showGpu && monitor.gpus.length > 0
     // Single-letter shortcuts stand down while the filter has the keyboard
     // or a question is open, so typing doesn't kill processes.
     readonly property bool typing: processes.filtering || confirm.visible || limiter.visible
@@ -207,6 +209,7 @@ ApplicationWindow {
     Shortcut { sequence: "3"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.showDisks = !win.showDisks }
     Shortcut { sequence: "4"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.showNetwork = !win.showNetwork }
     Shortcut { sequence: "5"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.showProcesses = !win.showProcesses }
+    Shortcut { sequence: "6"; context: Qt.ApplicationShortcut; enabled: !win.typing; onActivated: win.showGpu = !win.showGpu }
 
     // Right-to-left languages mirror the window; the Translator sets the
     // application's layout direction.
@@ -257,11 +260,26 @@ ApplicationWindow {
                 wrapMode: Text.Wrap
             }
 
-            CpuPanel {
-                visible: win.showCpu
+            // The two processors side by side: the CPU, and the GPU where
+            // the machine has one.
+            RowLayout {
+                visible: win.showCpu || win.gpuShown
                 Layout.fillWidth: true
                 Layout.preferredHeight: Math.max(150, win.height * 0.26)
                 Layout.fillHeight: !win.leftColumn && !win.showProcesses
+                spacing: 10
+
+                CpuPanel {
+                    visible: win.showCpu
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
+                GpuPanel {
+                    visible: win.gpuShown
+                    Layout.fillWidth: !win.showCpu
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: Math.max(330, win.width * 0.3)
+                }
             }
 
             RowLayout {

@@ -2,7 +2,8 @@
 """A made-up system for Vitals to watch, for screenshots and demos.
 
 Writes a stand-in /proc and /sys under ROOT and keeps their counters moving
-four times a second, following a fixed script: a browser streaming video,
+four times a second, following a fixed script: a browser streaming video
+(decoded on the Radeon 780M, the CPU's own GPU),
 music, a video export held to two cores, a paused game store, and a Rust
 build in a terminal that takes every core for half a minute, about two
 minutes in. Nothing in it comes from the machine it runs on.
@@ -31,6 +32,8 @@ BUILD_START, BUILD_END = 110.0, 142.0  # The build, in seconds from the start.
 random.seed(7)
 ROOT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "vitals-demo")
 PROC, SYS = f"{ROOT}/proc", f"{ROOT}/sys"
+GPU_SLOT = "0000:c4:00.0"
+GPU = f"{SYS}/devices/pci0000:00/{GPU_SLOT}"
 
 
 def write(path, text):
@@ -84,10 +87,15 @@ FROZEN = {"steam"}
 
 class Process:
     def __init__(self, pid, ppid, comm, command, group, user=UID, threads=1,
-                 cpu=lambda t: 0.0, memory=50, read=lambda t: 0.0, written=lambda t: 0.0):
+                 cpu=lambda t: 0.0, memory=50, read=lambda t: 0.0, written=lambda t: 0.0,
+                 gpu=None, vram=0):
         self.pid, self.ppid, self.comm, self.command = pid, ppid, comm, command
         self.group, self.user, self.threads = group, user, threads
         self.cpu, self.memory, self.read_rate, self.write_rate = cpu, memory, read, written
+        # Percent of the GPU, and MiB of GPU buffers; None for no GPU at all.
+        self.gpu, self.vram = gpu, vram
+        self.gpu_ns = 0.0
+        self.now_gpu = 0.0
         self.ticks = 0.0
         self.read = self.written = 0.0
         self.now_cpu = 0.0
@@ -112,9 +120,10 @@ def renderer(pid, title, base):
 PROCESSES = [
     # The compositor and the desktop's own services.
     Process(1063, 1, "Hyprland", "Hyprland --watchdog-fd 4", "hyprland", threads=14,
-            cpu=lambda t: noisy(wave(t, 9, 1.5, 4.0)), memory=310),
+            cpu=lambda t: noisy(wave(t, 9, 1.5, 4.0)), memory=310,
+            gpu=lambda t: noisy(wave(t, 9, 4, 9) + (3 if building(t) else 0)), vram=96),
     Process(1190, 1063, "quickshell", "quickshell -n -p /usr/share/omarchy/shell", "hyprland", threads=22,
-            cpu=lambda t: noisy(1.2), memory=240),
+            cpu=lambda t: noisy(1.2), memory=240, gpu=lambda t: noisy(1.2), vram=38),
     Process(1201, 1, "pipewire", "/usr/bin/pipewire", "pipewire", threads=3, cpu=lambda t: noisy(1.1), memory=18),
     Process(1202, 1, "wireplumber", "/usr/bin/wireplumber", "wireplumber", threads=6, cpu=lambda t: noisy(0.3), memory=22),
     Process(1240, 1, "xdg-desktop-por", "/usr/lib/xdg-desktop-portal", "portal", threads=5, cpu=lambda t: 0.05, memory=14),
@@ -133,7 +142,8 @@ PROCESSES = [
     Process(2210, 1, "chromium", "/usr/lib/chromium/chromium --ozone-platform=wayland", "chromium", threads=48,
             cpu=lambda t: noisy(wave(t, 31, 4, 9) + page_load(t)), memory=420, read=lambda t: noisy(20e3)),
     Process(2241, 2210, "chromium", "/usr/lib/chromium/chromium --type=gpu-process --ozone-platform=wayland",
-            "chromium", threads=12, cpu=lambda t: noisy(wave(t, 13, 8, 16)), memory=390),
+            "chromium", threads=12, cpu=lambda t: noisy(wave(t, 13, 8, 16)), memory=390,
+            gpu=lambda t: noisy(wave(t, 17, 16, 27) + page_load(t) / 8), vram=210),
     renderer(2263, "YouTube", 22),
     renderer(2288, "GitHub", 4),
     renderer(2301, "Omarchy Manual", 1.5),
@@ -146,18 +156,20 @@ PROCESSES = [
     Process(2416, 2402, "bash", "/bin/bash", "foot", memory=6),
     Process(2490, 2416, "nvim", "nvim src/sampler.rs", "foot", threads=4, cpu=lambda t: noisy(0.4), memory=88),
     Process(2733, 1, "obsidian", "/usr/lib/electron/electron /usr/lib/obsidian/app.asar", "obsidian", threads=31,
-            cpu=lambda t: noisy(0.4), memory=610),
+            cpu=lambda t: noisy(0.4), memory=610, gpu=lambda t: noisy(0.4), vram=24),
     Process(2810, 1, "spotify", "/opt/spotify/spotify", "spotify", threads=42,
-            cpu=lambda t: noisy(3.2), memory=480, read=lambda t: noisy(8e3)),
-    Process(2902, 1, "steam", "/usr/lib/steam/steam", "steam", threads=56, memory=880),
+            cpu=lambda t: noisy(3.2), memory=480, read=lambda t: noisy(8e3), gpu=lambda t: noisy(0.9), vram=31),
+    Process(2902, 1, "steam", "/usr/lib/steam/steam", "steam", threads=56, memory=880,
+            gpu=lambda t: 0.0, vram=118),
     Process(2961, 2902, "steamwebhelper", "/usr/lib/steam/steamwebhelper --type=renderer", "steam", threads=21, memory=310),
-    Process(3104, 1, "omacut", "omacut trip-to-the-coast.mov", "omacut", threads=11, cpu=lambda t: noisy(1.5), memory=220),
+    Process(3104, 1, "omacut", "omacut trip-to-the-coast.mov", "omacut", threads=11, cpu=lambda t: noisy(1.5), memory=220,
+            gpu=lambda t: noisy(2.4), vram=64),
     Process(3120, 3104, "ffmpeg", "ffmpeg -ss 00:01:12 -to 00:04:40 -i trip-to-the-coast.mov -c:v libx264 -preset slow "
             "-crf 18 -c:a copy trip-to-the-coast-cut.mp4", "omacut", threads=17,
             cpu=lambda t: noisy(560, 0.05), memory=740,
             read=lambda t: noisy(14e6), written=lambda t: noisy(6e6)),
     Process(3211, 1, "signal-desktop", "/usr/lib/signal-desktop/signal-desktop", "signal", threads=28,
-            cpu=lambda t: noisy(0.3), memory=350),
+            cpu=lambda t: noisy(0.3), memory=350, gpu=lambda t: noisy(0.2), vram=18),
 
     # A few kernel threads, hidden unless asked for.
     Process(2, 0, "kthreadd", "", "", user=0),
@@ -218,6 +230,13 @@ def setup():
     write(f"{SYS}/class/net/wlan0/operstate", "up\n")
     write(f"{SYS}/class/hwmon/hwmon3/name", "k10temp\n")
     write(f"{SYS}/class/hwmon/hwmon3/temp1_label", "Tctl\n")
+    # The Ryzen's own GPU, a Radeon 780M, with its card and render nodes.
+    write(f"{GPU}/uevent", f"DRIVER=amdgpu\nPCI_SLOT_NAME={GPU_SLOT}\n")
+    write(f"{GPU}/product_name", "AMD Radeon 780M\n")
+    write(f"{GPU}/mem_info_vram_total", f"{2048 << 20}\n")  # The carve-out the firmware sets.
+    for node in ("card1", "renderD128"):
+        os.makedirs(f"{SYS}/class/drm/{node}", exist_ok=True)
+        os.symlink(GPU, f"{SYS}/class/drm/{node}/device")
     names = {"chromium": "Chromium", "foot": "Foot", "obsidian": "Obsidian", "spotify": "Spotify",
              "steam": "Steam", "omacut": "Omacut", "signal": "Signal"}
     for app_id, name in names.items():
@@ -289,6 +308,8 @@ def tick(t, counters, alive):
         p.now_read, p.now_written = p.read_rate(t), p.write_rate(t)
         if p.group in FROZEN:
             p.now_read = p.now_written = 0.0
+        p.now_gpu = 0.0 if p.gpu is None or p.group in FROZEN else p.gpu(t)
+        p.gpu_ns += p.now_gpu / 100 * TICK * 1e9
         p.ticks += p.now_cpu / 100 * span
         p.read += p.now_read * TICK
         p.written += p.now_written * TICK
@@ -316,6 +337,15 @@ def tick(t, counters, alive):
     write(f"{PROC}/net/dev", "Inter-|   Receive                                                |  Transmit\n"
                              " face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets\n"
                              f" wlan0: {int(counters.rx)} 0 0 0 0 0 0 0 {int(counters.tx)} 0 0 0 0 0 0 0\n")
+
+    # The GPU: busy as its apps add up to, its memory, clock and sensors.
+    gpu_busy = min(100.0, sum(p.now_gpu for p in processes))
+    vram = sum(p.vram for p in processes if p.gpu is not None) + 40
+    write(f"{GPU}/gpu_busy_percent", f"{int(round(gpu_busy))}\n")
+    write(f"{GPU}/mem_info_vram_used", f"{vram << 20}\n")
+    write(f"{GPU}/hwmon/hwmon5/temp1_input", f"{int((44 + 0.35 * gpu_busy + 16 * load + random.uniform(-0.5, 0.5)) * 1000)}\n")
+    write(f"{GPU}/hwmon/hwmon5/power1_input", f"{int((4.5 + 0.22 * gpu_busy + random.uniform(-0.3, 0.3)) * 1e6)}\n")
+    write(f"{GPU}/hwmon/hwmon5/freq1_input", f"{int((800 + 19 * gpu_busy + random.uniform(-20, 20)) * 1e6)}\n")
 
     total_kb = 32 * 1024 * 1024
     used_kb = (held + 1900) * 1024
@@ -353,6 +383,15 @@ def write_process(p):
     if not p.kernel:
         write(f"{base}/io", f"rchar: 0\nwchar: 0\nsyscr: 0\nsyscw: 0\nread_bytes: {int(p.read)}\n"
                             f"write_bytes: {int(p.written)}\ncancelled_write_bytes: 0\n")
+    if p.gpu is not None:
+        # An open render node, as the kernel describes it to its owner.
+        if not os.path.islink(f"{base}/fd/12"):
+            os.makedirs(f"{base}/fd", exist_ok=True)
+            os.symlink("/dev/dri/renderD128", f"{base}/fd/12")
+        write(f"{base}/fdinfo/12", f"pos:\t0\nflags:\t02100002\ndrm-driver:\tamdgpu\ndrm-client-id:\t{p.pid}\n"
+                                   f"drm-pdev:\t{GPU_SLOT}\ndrm-memory-vram:\t{p.vram * 1024} KiB\n"
+                                   f"drm-memory-gtt: \t{p.vram * 256} KiB\ndrm-memory-cpu: \t0 KiB\n"
+                                   f"drm-engine-gfx:\t{int(p.gpu_ns)} ns\n")
 
 
 def main():

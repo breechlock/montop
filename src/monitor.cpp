@@ -33,6 +33,7 @@ Monitor::Monitor(const QString &procRoot, const QString &sysRoot, QObject *paren
         m_sys = root + "/sys";
     }
     m_pageSize = sysconf(_SC_PAGESIZE);
+    m_gpus = std::make_unique<gpu::Gpus>(m_sys);
     // From /proc, so a stand-in root under test brings its own.
     m_hostname = readLine(m_proc + "/sys/kernel/hostname");
     if (m_hostname.isEmpty())
@@ -57,6 +58,19 @@ Monitor::Monitor(const QString &procRoot, const QString &sysRoot, QObject *paren
             m_cpuModel = m_cpuModel.simplified();
             break;
         }
+    }
+    // Arm has no model name in cpuinfo. The device tree names the machine
+    // ("Apple MacBook Air (13-inch, M2, 2022)"); the SoC driver names the
+    // chip ("Snapdragon X1E80100").
+    if (m_cpuModel.isEmpty())
+        m_cpuModel = QString::fromUtf8(readFile(m_sys + "/firmware/devicetree/base/model", 256)).remove(QChar(0)).trimmed();
+    if (m_cpuModel.isEmpty()) {
+        // Firmware-reported IDs ("jep106:0070:...") are codes, not names.
+        auto name = [&](const char *field) {
+            const QString value = readLine(m_sys + "/devices/soc0/" + field);
+            return value.startsWith("jep106") ? QString() : value;
+        };
+        m_cpuModel = (name("family") + ' ' + name("machine")).trimmed();
     }
     m_temperatureInput = findTemperatureInput();
     m_uid = getuid();
@@ -193,6 +207,78 @@ void Monitor::sampleSystem() {
     sampleMemory();
     sampleDisks(seconds);
     sampleNetworks(seconds);
+    sampleGpus();
+}
+
+void Monitor::sampleGpus() {
+    m_gpus->sample(m_clock.elapsed());
+    const QList<gpu::Device> &devices = m_gpus->devices();
+    for (int i = 0; i < devices.size(); ++i)
+        push(QString("gpu/%1").arg(i), std::max(0.0, devices[i].busy));
+}
+
+QVariantList Monitor::gpus() const {
+    QVariantList list;
+    for (const gpu::Device &d : m_gpus->devices())
+        list.append(QVariantMap{
+            {"name", d.name}, {"driver", d.driver}, {"asleep", d.asleep}, {"perApp", d.perApp}, {"busy", d.busy},
+            {"memoryUsed", d.memoryUsed}, {"memoryTotal", d.memoryTotal}, {"appMemory", d.appMemory},
+            {"mhz", d.mhz}, {"temperature", d.temperature}, {"watts", d.watts}, {"fan", d.fan}, {"note", d.note}});
+    return list;
+}
+
+void Monitor::sampleGpuClients(const QString &base, ProcessInfo &p, bool known, double seconds,
+                               QHash<QString, QHash<QString, double>> &shares, QHash<QString, quint64> &memory,
+                               QHash<QString, gpu::Client> &clients) {
+    auto cached = m_gpuFds.find(p.pid);
+    if (!known || cached == m_gpuFds.end())
+        cached = m_gpuFds.insert(p.pid, {});
+    // A process opens the GPU as it starts, so it's listed on each of its
+    // first scans; after that every 15th scan if it uses the GPU, else every
+    // 30th, spread over the PIDs so no one scan lists them all.
+    const int every = cached->fds.isEmpty() ? 30 : 15;
+    if (cached->listed < 3 || (p.pid + m_scanCount) % every == 0) {
+        QList<QPair<int, QString>> fds;
+        const QByteArray fdDir = QFile::encodeName(base + "/fd");
+        if (DIR *dir = opendir(fdDir.constData())) {
+            char target[256];
+            while (dirent *entry = readdir(dir)) {
+                if (entry->d_name[0] < '0' || entry->d_name[0] > '9')
+                    continue;
+                const QByteArray link = fdDir + '/' + entry->d_name;
+                const ssize_t n = ::readlink(link.constData(), target, sizeof target - 1);
+                if (n > 9 && memcmp(target, "/dev/dri/", 9) == 0)
+                    fds.append({atoi(entry->d_name), QString::fromLatin1(target + 9, int(n - 9))});
+            }
+            closedir(dir);
+        }
+        cached->fds = fds;
+        ++cached->listed;
+    }
+    for (const auto &[fd, node] : std::as_const(cached->fds)) {
+        const QString device = m_gpus->deviceOf(node);
+        gpu::Client client;
+        if (device.isEmpty() || !gpu::parseFdinfo(readFile(base + "/fdinfo/" + QString::number(fd), 8192), client))
+            continue;
+        // One client reached through dup'd or inherited fds counts once.
+        const QString key = device + '#' + (client.id.isEmpty() ? QString("%1:%2").arg(p.pid).arg(fd) : client.id);
+        if (clients.contains(key))
+            continue;
+        clients.insert(key, client);
+        const auto before = m_prevClients.constFind(key);
+        if (before != m_prevClients.constEnd()) {
+            const QHash<QString, double> engines = gpu::engineShares(*before, client, seconds);
+            QHash<QString, double> &deviceShares = shares[device];
+            double busiest = 0;
+            for (auto it = engines.begin(); it != engines.end(); ++it) {
+                busiest = std::max(busiest, it.value());
+                deviceShares[it.key()] += it.value();
+            }
+            p.gpu += 100 * busiest;
+        }
+        p.gpuMemory += client.memory;
+        memory[device] += client.memory;
+    }
 }
 
 void Monitor::sampleProcessTable() {
@@ -270,6 +356,16 @@ QString Monitor::findTemperatureInput() const {
                 return base + "/temp1_input";
         }
     }
+    // Arm SoCs report through thermal zones instead: "cpu0-thermal",
+    // "cpu-0-0-top-thermal", "cpuss0-thermal". (Apple's chips report no CPU
+    // temperature on Linux at all.)
+    const QDir thermal(m_sys + "/class/thermal");
+    QStringList zones = thermal.entryList({"thermal_zone*"}, QDir::Dirs | QDir::NoDotAndDotDot | QDir::System);
+    std::sort(zones.begin(), zones.end(), [](const QString &a, const QString &b) { return a.mid(12).toInt() < b.mid(12).toInt(); });
+    for (const QString &prefix : {QString("x86_pkg_temp"), QString("cpu"), QString("soc")})
+        for (const QString &zone : zones)
+            if (readLine(thermal.filePath(zone) + "/type").startsWith(prefix) && QFileInfo::exists(thermal.filePath(zone) + "/temp"))
+                return thermal.filePath(zone) + "/temp";
     return {};
 }
 
@@ -414,6 +510,9 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
     QHash<int, PidHistory> seen;
     m_cgroupOf.clear();
     int tasks = 0;
+    QHash<QString, QHash<QString, double>> gpuShares;
+    QHash<QString, quint64> gpuMemory;
+    QHash<QString, gpu::Client> gpuClients;
     while (dirent *entry = readdir(dir)) {
         if (entry->d_name[0] < '1' || entry->d_name[0] > '9')
             continue;
@@ -489,10 +588,32 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
             p.readRate = p.writeRate = 0;
         }
 
+        if (m_gpus->any() && !p.kernel)
+            sampleGpuClients(base, p, known, seconds, gpuShares, gpuMemory, gpuClients);
+
         seen.insert(p.pid, history);
         processes.append(p);
     }
     closedir(dir);
+
+    // GPU usage: devices without counters of their own add up their
+    // clients', and NVIDIA's driver reports per process through NVML.
+    ++m_scanCount;
+    m_prevClients = gpuClients;
+    for (auto it = m_gpuFds.begin(); it != m_gpuFds.end();)
+        it = seen.contains(it.key()) ? std::next(it) : m_gpuFds.erase(it);
+    m_gpus->setClientTotals(gpuShares, gpuMemory);
+    const QHash<int, gpu::ProcessUsage> nvidia = m_gpus->nvidiaProcesses();
+    if (!nvidia.isEmpty()) {
+        for (ProcessInfo &p : processes) {
+            const auto usage = nvidia.constFind(p.pid);
+            if (usage != nvidia.constEnd()) {
+                p.gpu += usage->percent;
+                p.gpuMemory += usage->memory;
+            }
+        }
+    }
+    m_processes.setGpuAvailable(m_gpus->perApp());
 
     m_prevPids = seen;
     m_taskCount = tasks;
@@ -516,7 +637,7 @@ void Monitor::recordMoment() {
     std::sort(groups.begin(), groups.end(), [](const GroupInfo &a, const GroupInfo &b) { return a.memory > b.memory; });
     for (int i = 0; i < groups.size(); ++i) {
         GroupInfo g = groups[i];
-        if (i >= 20 && g.cpu < 0.1 && io(g.readRate) + io(g.writeRate) == 0)
+        if (i >= 20 && g.cpu < 0.1 && g.gpu < 0.1 && io(g.readRate) + io(g.writeRate) == 0)
             continue;
         // The same few strings come back every second; keep one copy each.
         g.key = intern(g.key);
@@ -534,7 +655,7 @@ void Monitor::recordMoment() {
     std::sort(byMemory.begin(), byMemory.end(), [](const ProcessInfo &a, const ProcessInfo &b) { return a.memory > b.memory; });
     for (int i = 0; i < byMemory.size(); ++i) {
         ProcessInfo p = byMemory[i];
-        if (i >= 20 && p.cpu < 0.5 && io(p.readRate) + io(p.writeRate) == 0)
+        if (i >= 20 && p.cpu < 0.5 && p.gpu < 0.5 && io(p.readRate) + io(p.writeRate) == 0)
             continue;
         p.group = intern(p.group);
         p.name = intern(p.name);
@@ -616,6 +737,7 @@ QVariantList Monitor::blame(double time, const QString &what, int count) const {
                : what == "read" ? std::max(0.0, g.readRate)
                : what == "write" ? std::max(0.0, g.writeRate)
                : what == "io" ? std::max(0.0, g.readRate) + std::max(0.0, g.writeRate)
+               : what == "gpu" ? g.gpu
                               : g.cpu;
     };
     QList<const GroupInfo *> groups;
@@ -688,6 +810,8 @@ QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, do
             acc.cgroups.append(cgroup);
         acc.cpuByCgroup[cgroup] += p.cpu;
         acc.memoryByCgroup[cgroup] += p.memory;
+        acc.group.gpu += p.gpu;
+        acc.group.gpuMemory += p.gpuMemory;
         if (p.readRate >= 0) { acc.readSum += p.readRate; acc.readKnown = true; }
         if (p.writeRate >= 0) { acc.writeSum += p.writeRate; acc.writeKnown = true; }
         acc.names.insert(p.pid, p.name);

@@ -36,13 +36,14 @@ QString duration(qint64 seconds) {
     return d > 0 ? QString("%1d %2h").arg(d).arg(h) : h > 0 ? QString("%1h %2m").arg(h).arg(m) : QString("%1m").arg(m);
 }
 
-const QStringList sorts{"cpu", "memory", "read", "write"};
+const QStringList sorts{"cpu", "memory", "read", "write", "gpu"};
 
 ProcessModel::Column columnFor(const QString &sort) {
     return sort == "memory" ? ProcessModel::Memory
            : sort == "read" ? ProcessModel::Read
            : sort == "write" ? ProcessModel::Write
-                             : ProcessModel::Cpu;
+           : sort == "gpu" ? ProcessModel::Gpu
+                           : ProcessModel::Cpu;
 }
 
 QList<ProcessInfo> sortedProcesses(const Monitor &monitor, const QString &sort) {
@@ -63,17 +64,30 @@ QList<GroupInfo> sortedGroups(const Monitor &monitor, const QString &sort) {
     return list;
 }
 
-QJsonObject processJson(const ProcessInfo &p, const QHash<QString, QString> &appNames) {
-    return {
+// A number, or null where it's unknown (-1).
+QJsonValue known(double value, double scale = 1, bool round = false) {
+    if (value < 0)
+        return QJsonValue();
+    return round ? QJsonValue(std::round(value * scale)) : QJsonValue(round1(value * scale));
+}
+
+QJsonObject processJson(const ProcessInfo &p, const QHash<QString, QString> &appNames, bool gpu) {
+    QJsonObject json{
         {"pid", p.pid}, {"ppid", p.ppid}, {"name", p.name}, {"app", appNames.value(p.group)},
         {"user", p.user}, {"state", QString(QChar(p.state))}, {"threads", p.threads},
         {"cpu_percent", round1(p.cpu)}, {"memory_bytes", double(p.memory)},
         {"read_bytes_per_second", rateJson(p.readRate)}, {"write_bytes_per_second", rateJson(p.writeRate)},
         {"command", p.command},
     };
+    if (gpu) {
+        json.insert("gpu_percent", round1(p.gpu));
+        json.insert("gpu_memory_bytes", double(p.gpuMemory));
+    }
+    return json;
 }
 
-QJsonObject appJson(const GroupInfo &g, const QHash<int, ProcessInfo> &byPid, const QHash<QString, QString> &appNames) {
+QJsonObject appJson(const GroupInfo &g, const QHash<int, ProcessInfo> &byPid, const QHash<QString, QString> &appNames,
+                    bool gpu) {
     // The few processes that matter most inside the app, so an agent can
     // name the tab or build step without a second call.
     QList<ProcessInfo> members;
@@ -85,10 +99,10 @@ QJsonObject appJson(const GroupInfo &g, const QHash<int, ProcessInfo> &byPid, co
     });
     QJsonArray top, pids;
     for (int i = 0; i < members.size() && i < 3; ++i)
-        top.append(processJson(members[i], appNames));
+        top.append(processJson(members[i], appNames, gpu));
     for (int pid : g.pids)
         pids.append(pid);
-    return {
+    QJsonObject json{
         {"name", g.name}, {"kind", g.kind}, {"key", g.key}, {"units", QJsonArray::fromStringList(g.units)},
         {"user", g.user}, {"processes", int(g.pids.size())}, {"threads", g.threads},
         {"cpu_percent", round1(g.cpu)}, {"memory_bytes", double(g.memory)},
@@ -97,6 +111,53 @@ QJsonObject appJson(const GroupInfo &g, const QHash<int, ProcessInfo> &byPid, co
         {"paused", g.frozen}, {"cpu_limit_percent", g.cpuLimit > 0 ? QJsonValue(round1(g.cpuLimit)) : QJsonValue()},
         {"controllable", g.control.isEmpty()},
     };
+    if (gpu) {
+        json.insert("gpu_percent", round1(g.gpu));
+        json.insert("gpu_memory_bytes", double(g.gpuMemory));
+    }
+    return json;
+}
+
+QJsonArray gpusJson(const Monitor &monitor) {
+    QJsonArray list;
+    for (const gpu::Device &d : monitor.gpuDevices())
+        list.append(QJsonObject{
+            {"name", d.name}, {"driver", d.driver}, {"asleep", d.asleep},
+            {"busy_percent", known(d.busy, 100)}, {"per_app", d.perApp},
+            {"memory_used_bytes", known(d.memoryUsed, 1, true)}, {"memory_total_bytes", known(d.memoryTotal, 1, true)},
+            {"app_memory_bytes", known(d.appMemory, 1, true)}, {"frequency_mhz", known(d.mhz, 1, true)},
+            {"temperature_celsius", known(d.temperature)}, {"power_watts", known(d.watts)},
+            {"fan_percent", known(d.fan, 1, true)}, {"note", d.note.isEmpty() ? QJsonValue() : QJsonValue(d.note)},
+        });
+    return list;
+}
+
+// One line per GPU for the terminal.
+QStringList gpuLines(const Monitor &monitor) {
+    QStringList lines;
+    for (const gpu::Device &d : monitor.gpuDevices()) {
+        QStringList parts{d.name};
+        if (d.asleep)
+            parts << "asleep";
+        if (d.busy >= 0)
+            parts << QString("%1% busy").arg(qRound(d.busy * 100));
+        if (d.mhz > 0)
+            parts << QString("%1 GHz").arg(d.mhz / 1000, 0, 'f', 2);
+        if (d.temperature >= 0)
+            parts << QString("%1 °C").arg(qRound(d.temperature));
+        if (d.watts >= 0)
+            parts << QString("%1 W").arg(d.watts, 0, 'f', 1);
+        if (d.memoryTotal > 0 && d.memoryUsed >= 0)
+            parts << QString("memory %1 of %2").arg(bytes(d.memoryUsed), bytes(d.memoryTotal));
+        else if (d.appMemory > 0)
+            parts << QString("apps hold %1").arg(bytes(d.appMemory));
+        if (d.fan >= 0)
+            parts << QString("fan %1%").arg(qRound(d.fan));
+        if (!d.note.isEmpty())
+            parts << d.note;
+        lines << "GPU      " + parts.join(" · ");
+    }
+    return lines;
 }
 
 struct Command {
@@ -110,7 +171,7 @@ struct Command {
     void sampling() {
         parser.addOption({"interval", "Milliseconds between the two samples rates are measured over (default 1000)",
                           "ms", "1000"});
-        parser.addOption({"sort", "Order by cpu, memory, read, or write (default cpu)", "column", "cpu"});
+        parser.addOption({"sort", "Order by cpu, memory, read, write, or gpu (default cpu)", "column", "cpu"});
     }
     QString argument(int index) const { return parser.positionalArguments().value(index); }
 
@@ -182,6 +243,7 @@ int snapshot(const QStringList &arguments) {
     if (monitor.cpuTemperature() >= 0)
         cpu += QString(" · %1 °C").arg(qRound(monitor.cpuTemperature()));
     out << cpu;
+    out << gpuLines(monitor);
     out << QString("Memory   %1 used of %2, %3 available · swap %4 of %5")
                .arg(bytes(monitor.memoryUsed()), bytes(monitor.memoryTotal()), bytes(monitor.memoryAvailable()),
                     bytes(monitor.swapUsed()), bytes(monitor.swapTotal()));
@@ -204,13 +266,15 @@ int snapshot(const QStringList &arguments) {
                        .arg(net["name"].toString(), rate(net["rxRate"].toDouble()), rate(net["txRate"].toDouble()));
     }
 
+    const bool gpu = monitor.gpuPerApp();
     const auto groups = sortedGroups(monitor, sort);
     out << "" << QString("Apps by %1").arg(sort);
-    out << pad("APP", 28) + pad("CPU%", 7, true) + pad("MEMORY", 11, true) + pad("READ/S", 12, true)
-               + pad("WRITE/S", 12, true) + pad("PROCS", 7, true);
+    out << pad("APP", 28) + pad("CPU%", 7, true) + (gpu ? pad("GPU%", 7, true) : QString()) + pad("MEMORY", 11, true)
+               + pad("READ/S", 12, true) + pad("WRITE/S", 12, true) + pad("PROCS", 7, true);
     for (int i = 0; i < groups.size() && (top == 0 || i < top); ++i) {
         const GroupInfo &g = groups[i];
-        out << pad(g.name, 28) + pad(QString::number(g.cpu, 'f', 1), 7, true) + pad(bytes(g.memory), 11, true)
+        out << pad(g.name, 28) + pad(QString::number(g.cpu, 'f', 1), 7, true)
+                   + (gpu ? pad(QString::number(g.gpu, 'f', 1), 7, true) : QString()) + pad(bytes(g.memory), 11, true)
                    + pad(rate(g.readRate), 12, true) + pad(rate(g.writeRate), 12, true)
                    + pad(QString::number(g.pids.size()), 7, true);
     }
@@ -218,15 +282,18 @@ int snapshot(const QStringList &arguments) {
     const auto names = appNames(monitor);
     const auto processes = sortedProcesses(monitor, sort);
     out << "" << QString("Processes by %1").arg(sort);
-    out << pad("PID", 8, true) + "  " + pad("NAME", 20) + pad("APP", 18) + pad("CPU%", 7, true) + pad("MEMORY", 11, true)
-               + "  COMMAND";
+    out << pad("PID", 8, true) + "  " + pad("NAME", 20) + pad("APP", 18) + pad("CPU%", 7, true)
+               + (gpu ? pad("GPU%", 7, true) : QString()) + pad("MEMORY", 11, true) + "  COMMAND";
     for (int i = 0; i < processes.size() && (top == 0 || i < top); ++i) {
         const ProcessInfo &p = processes[i];
         out << pad(QString::number(p.pid), 8, true) + "  " + pad(p.name, 20) + pad(names.value(p.group), 18)
-                   + pad(QString::number(p.cpu, 'f', 1), 7, true) + pad(bytes(p.memory), 11, true) + "  "
+                   + pad(QString::number(p.cpu, 'f', 1), 7, true)
+                   + (gpu ? pad(QString::number(p.gpu, 'f', 1), 7, true) : QString()) + pad(bytes(p.memory), 11, true)
+                   + "  "
                    + p.command.left(80);
     }
-    out << "" << "CPU% is of one core; a process busy on two cores shows 200.";
+    out << "" << "CPU% is of one core; a process busy on two cores shows 200."
+        + QString(gpu ? " GPU% is of one GPU." : "");
     print(stdout, out.join('\n'));
     return 0;
 }
@@ -331,13 +398,15 @@ int appsCommand(const QStringList &arguments) {
         const auto names = appNames(monitor);
         QJsonArray list;
         for (const GroupInfo &g : groups)
-            list.append(appJson(g, byPid, names));
+            list.append(appJson(g, byPid, names, monitor.gpuPerApp()));
         print(QJsonObject{{"apps", list}, {"cores", monitor.coreCount()}});
         return 0;
     }
     QStringList out;
-    out << pad("APP", 28) + pad("KIND", 9) + pad("CPU%", 7, true) + pad("MEMORY", 11, true) + pad("READ/S", 12, true)
-               + pad("WRITE/S", 12, true) + pad("PROCS", 7, true) + "  STATE";
+    const bool gpu = monitor.gpuPerApp();
+    out << pad("APP", 28) + pad("KIND", 9) + pad("CPU%", 7, true) + (gpu ? pad("GPU%", 7, true) : QString())
+               + pad("MEMORY", 11, true) + pad("READ/S", 12, true) + pad("WRITE/S", 12, true) + pad("PROCS", 7, true)
+               + "  STATE";
     for (const GroupInfo &g : groups) {
         QStringList state;
         if (g.frozen)
@@ -345,7 +414,7 @@ int appsCommand(const QStringList &arguments) {
         if (g.cpuLimit > 0)
             state << "limit " + QString::number(g.cpuLimit, 'f', 0) + "%";
         out << pad(g.name, 28) + pad(g.kind, 9) + pad(QString::number(g.cpu, 'f', 1), 7, true)
-                   + pad(bytes(g.memory), 11, true) + pad(rate(g.readRate), 12, true) + pad(rate(g.writeRate), 12, true)
+                   + (gpu ? pad(QString::number(g.gpu, 'f', 1), 7, true) : QString()) + pad(bytes(g.memory), 11, true) + pad(rate(g.readRate), 12, true) + pad(rate(g.writeRate), 12, true)
                    + pad(QString::number(g.pids.size()), 7, true) + "  " + state.join(", ");
     }
     print(stdout, out.join('\n'));
@@ -477,11 +546,11 @@ QJsonObject snapshotJson(const Monitor &monitor, int top, const QString &sort) {
     QJsonArray apps;
     const auto groups = sortedGroups(monitor, sort);
     for (int i = 0; i < groups.size() && (top == 0 || i < top); ++i)
-        apps.append(appJson(groups[i], byPid, names));
+        apps.append(appJson(groups[i], byPid, names, monitor.gpuPerApp()));
     QJsonArray processes;
     const auto sortedList = sortedProcesses(monitor, sort);
     for (int i = 0; i < sortedList.size() && (top == 0 || i < top); ++i)
-        processes.append(processJson(sortedList[i], names));
+        processes.append(processJson(sortedList[i], names, monitor.gpuPerApp()));
 
     return {
         {"time", QDateTime::currentDateTime().toString(Qt::ISODate)},
@@ -499,6 +568,7 @@ QJsonObject snapshotJson(const Monitor &monitor, int top, const QString &sort) {
                        {"available_bytes", monitor.memoryAvailable()}, {"cached_bytes", monitor.memoryCached()},
                        {"swap_total_bytes", monitor.swapTotal()}, {"swap_used_bytes", monitor.swapUsed()},
                    }},
+        {"gpus", gpusJson(monitor)},
         {"disks", disks},
         {"filesystems", filesystems},
         {"network", networks},
@@ -507,7 +577,8 @@ QJsonObject snapshotJson(const Monitor &monitor, int top, const QString &sort) {
         {"processes", processes},
         {"notes", "cpu_percent is relative to one core (a process busy on two cores shows 200). "
                   "App totals come from the app's cgroups and include child processes that already exited. "
-                  "A null rate means the kernel did not let this user read it."},
+                  "gpu_percent is of one GPU, from the driver's per-client counters (or NVIDIA's NVML). "
+                  "A null rate means the kernel did not let this user read it; a null GPU number means its driver doesn't report it."},
     };
 }
 

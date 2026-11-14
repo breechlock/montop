@@ -12,6 +12,10 @@
     "one": "%n core",
     "other": "%n cores"
   },
+  "%n GPUs": {
+    "one": "%n GPU",
+    "other": "%n GPUs"
+  },
   "%n processes": {
     "one": "%n process",
     "other": "%n processes"

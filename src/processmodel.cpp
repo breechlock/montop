@@ -57,6 +57,8 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const {
         case FrozenRole: return g.frozen;
         case CpuLimitRole: return g.cpuLimit;
         case ControlRole: return g.control;
+        case GpuRole: return g.gpu;
+        case GpuMemoryRole: return double(g.gpuMemory);
         }
         return {};
     }
@@ -82,6 +84,8 @@ QVariant ProcessModel::data(const QModelIndex &index, int role) const {
     case WriteRateRole: return p.writeRate;
     case KernelRole: return p.kernel;
     case GroupKeyRole: return p.group;
+    case GpuRole: return p.gpu;
+    case GpuMemoryRole: return double(p.gpuMemory);
     }
     // A process is paused or limited with its app.
     const auto group = m_groupIndex.constFind(p.group);
@@ -103,6 +107,7 @@ QHash<int, QByteArray> ProcessModel::roleNames() const {
         {MemoryRole, "memory"}, {MemoryShareRole, "memoryShare"}, {ReadRateRole, "readRate"},
         {WriteRateRole, "writeRate"}, {KernelRole, "kernel"}, {GroupKeyRole, "groupKey"},
         {FrozenRole, "frozen"}, {CpuLimitRole, "cpuLimit"}, {ControlRole, "control"},
+        {GpuRole, "gpu"}, {GpuMemoryRole, "gpuMemory"},
     };
 }
 
@@ -166,7 +171,9 @@ void ProcessModel::sortBy(Column column) {
 }
 
 void ProcessModel::cycleSort() {
-    static const QList<Column> order{Cpu, Memory, Read, Write, Pid, Name, User, Threads};
+    QList<Column> order{Cpu, Memory, Read, Write, Pid, Name, User, Threads};
+    if (m_gpuAvailable)
+        order.insert(1, Gpu);
     setSortColumn(order.at((order.indexOf(m_column) + 1) % order.size()));
 }
 
@@ -242,6 +249,7 @@ bool ProcessModel::lessThan(const ProcessInfo &a, const ProcessInfo &b, Column c
     case Read: c = compare(a.readRate, b.readRate); break;
     case Write: c = compare(a.writeRate, b.writeRate); break;
     case Threads: c = compare(a.threads, b.threads); break;
+    case Gpu: c = compare(a.gpu, b.gpu); break;
     }
     return ordered(c, descending, a.pid, b.pid);
 }
@@ -257,6 +265,7 @@ bool ProcessModel::lessThan(const GroupInfo &a, const GroupInfo &b, Column colum
     case Read: c = compare(a.readRate, b.readRate); break;
     case Write: c = compare(a.writeRate, b.writeRate); break;
     case Threads: c = compare(a.threads, b.threads); break;
+    case Gpu: c = compare(a.gpu, b.gpu); break;
     }
     return ordered(c, descending, a.key, b.key);
 }

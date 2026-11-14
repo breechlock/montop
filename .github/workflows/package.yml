@@ -1,14 +1,16 @@
 name: Package
 
-# Builds Vitals in omarchy-pkgs' own builder, the way that repository's CI
-# will, whenever the packaging or the build changes.
+# Builds and tests Vitals in omarchy-pkgs' own builder, the way that
+# repository's CI will, on x86_64 and natively on Arm (Snapdragon laptops,
+# Apple Silicon on Asahi), whenever the code or the packaging changes.
 on:
   pull_request:
     paths:
       - 'pkgbuild/**'
       - 'bin/**'
       - 'vitals.pro'
-      - 'src/skill.md'
+      - 'src/**'
+      - 'tests/**'
       - '.github/workflows/package.yml'
   push:
     branches: [main]
@@ -16,7 +18,8 @@ on:
       - 'pkgbuild/**'
       - 'bin/**'
       - 'vitals.pro'
-      - 'src/skill.md'
+      - 'src/**'
+      - 'tests/**'
       - '.github/workflows/package.yml'
   workflow_dispatch:
 
@@ -25,14 +28,20 @@ permissions:
 
 jobs:
   package:
-    name: Build in omarchy-pkgs' builder
-    runs-on: ubuntu-latest
+    name: Build in omarchy-pkgs' builder (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-latest }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install bsdtar
-        run: sudo apt-get update -q && sudo apt-get install -yq libarchive-tools
+      - name: Install bsdtar and Podman
+        run: sudo apt-get update -q && sudo apt-get install -yq libarchive-tools podman
 
       - name: Build and check the package (rootless Podman)
-        run: bin/package-check
+        run: bin/package-check --arch ${{ matrix.arch }}
