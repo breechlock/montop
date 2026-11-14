@@ -580,12 +580,28 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
         if (known && ticksPerCore > 0)
             p.cpu = 100.0 * double(stat.cpuTicks - std::min(stat.cpuTicks, before->ticks)) / ticksPerCore;
 
-        history.hasIo = parsePidIo(readFile(base + "/io", 4096), history.io);
-        if (history.hasIo && known && before->hasIo && seconds > 0) {
-            p.readRate = (history.io.readBytes - std::min(history.io.readBytes, before->io.readBytes)) / seconds;
-            p.writeRate = (history.io.writeBytes - std::min(history.io.writeBytes, before->io.writeBytes)) / seconds;
-        } else if (history.hasIo) {
-            p.readRate = p.writeRate = 0;
+        // A process that ran no CPU since the last scan did next to no I/O:
+        // its counters move in its own system calls. Most processes are
+        // idle, so they're read every fifth scan instead, spread over the
+        // PIDs, which makes the scan much cheaper. CPU time comes in 10 ms
+        // ticks, so a little I/O can hide in an "idle" process; its rate is
+        // taken over the time between reads, so it shows late, not wrong.
+        const bool idle = known && stat.cpuTicks == before->ticks && before->ioAt >= 0 && (p.pid + m_scanCount) % 5 != 0;
+        if (idle) {
+            history.hasIo = before->hasIo;
+            history.io = before->io;
+            history.ioAt = before->ioAt;
+            p.readRate = p.writeRate = before->hasIo ? 0 : -1;
+        } else {
+            history.hasIo = parsePidIo(readFile(base + "/io", 4096), history.io);
+            history.ioAt = m_clock.elapsed();
+            const double span = known ? (history.ioAt - before->ioAt) / 1000.0 : 0;
+            if (history.hasIo && known && before->hasIo && before->ioAt >= 0 && span > 0 && seconds > 0) {
+                p.readRate = (history.io.readBytes - std::min(history.io.readBytes, before->io.readBytes)) / span;
+                p.writeRate = (history.io.writeBytes - std::min(history.io.writeBytes, before->io.writeBytes)) / span;
+            } else if (history.hasIo) {
+                p.readRate = p.writeRate = 0;
+            }
         }
 
         if (m_gpus->any() && !p.kernel)
@@ -777,7 +793,19 @@ QString Monitor::groupName(const apps::Identity &identity, const QStringList &me
             name = m_desktopNames->name(member);
         }
     }
-    return name.isEmpty() ? identity.id : name;
+    if (!name.isEmpty())
+        return name;
+    // A template instance with no entry of its own ("org.gnome.Shell@user"):
+    // the template's entry, a desktop component's name, or the template.
+    // System services keep their instance: getty@tty1 is not getty@tty2.
+    if (identity.kind != "app" && identity.kind != "service")
+        return identity.id;
+    const QString base = identity.id.section('@', 0, 0);
+    if (base != identity.id)
+        name = m_desktopNames->name(base);
+    if (name.isEmpty())
+        name = apps::componentName(base);
+    return name.isEmpty() ? base : name;
 }
 
 QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, double seconds) {
@@ -874,39 +902,57 @@ QList<GroupInfo> Monitor::groupProcesses(const QList<ProcessInfo> &processes, do
                 if (line.startsWith("usage_usec "))
                     now.cpuUsec = line.mid(11).toULongLong();
 
-            // Memory the app itself holds: anonymous, shared, and kernel
-            // memory, but not the page cache, which the kernel hands back.
-            quint64 held = 0;
-            for (const QByteArray &line : readFile(root + cgroup + "/memory.stat", 16384).split('\n')) {
-                const QList<QByteArray> field = line.split(' ');
-                if (field.size() == 2 && (field[0] == "anon" || field[0] == "shmem" || field[0] == "kernel"))
-                    held += field[1].toULongLong();
-            }
-            memory += held > 0 ? held : acc.memoryByCgroup.value(cgroup);
-
-            // Only whole physical disks: a disk and the encrypted volume on
-            // top of it both list the same bytes.
-            const QByteArray io = readFile(root + cgroup + "/io.stat", 16384);
-            now.hasIo = !io.isNull();
-            for (const QByteArray &line : io.split('\n')) {
-                const QList<QByteArray> fields = line.split(' ');
-                if (fields.isEmpty() || !m_physicalDevices.contains(QString::fromLatin1(fields[0])))
-                    continue;
-                for (const QByteArray &field : fields) {
-                    if (field.startsWith("rbytes="))
-                        now.readBytes += field.mid(7).toULongLong();
-                    else if (field.startsWith("wbytes="))
-                        now.writeBytes += field.mid(7).toULongLong();
+            // memory.stat and io.stat are the costly files here, and an app
+            // that ran no CPU since the last scan has barely changed: its
+            // memory and disk counters are read every fifth scan instead,
+            // spread over the apps. Rates divide by the time between reads,
+            // so disk writes flushed meanwhile still show at their rate.
+            const auto before = m_prevCgroups.constFind(cgroup);
+            const bool idle = before != m_prevCgroups.constEnd() && before->readAt >= 0
+                              && before->cpuUsec == now.cpuUsec
+                              && (m_scanCount + int(qHash(cgroup) % 5)) % 5 != 0;
+            if (idle) {
+                now.held = before->held;
+                now.hasIo = before->hasIo;
+                now.readBytes = before->readBytes;
+                now.writeBytes = before->writeBytes;
+                now.readAt = before->readAt;
+            } else {
+                // Memory the app itself holds: anonymous, shared, and kernel
+                // memory, but not the page cache, which the kernel hands back.
+                for (const QByteArray &line : readFile(root + cgroup + "/memory.stat", 16384).split('\n')) {
+                    const QList<QByteArray> field = line.split(' ');
+                    if (field.size() == 2 && (field[0] == "anon" || field[0] == "shmem" || field[0] == "kernel"))
+                        now.held += field[1].toULongLong();
                 }
+                // Only whole physical disks: a disk and the encrypted volume
+                // on top of it both list the same bytes.
+                const QByteArray io = readFile(root + cgroup + "/io.stat", 16384);
+                now.hasIo = !io.isNull();
+                for (const QByteArray &line : io.split('\n')) {
+                    const QList<QByteArray> fields = line.split(' ');
+                    if (fields.isEmpty() || !m_physicalDevices.contains(QString::fromLatin1(fields[0])))
+                        continue;
+                    for (const QByteArray &field : fields) {
+                        if (field.startsWith("rbytes="))
+                            now.readBytes += field.mid(7).toULongLong();
+                        else if (field.startsWith("wbytes="))
+                            now.writeBytes += field.mid(7).toULongLong();
+                    }
+                }
+                now.readAt = m_clock.elapsed();
             }
+            memory += now.held > 0 ? now.held : acc.memoryByCgroup.value(cgroup);
             current.insert(cgroup, now);
 
-            const auto before = m_prevCgroups.constFind(cgroup);
             if (before != m_prevCgroups.constEnd() && seconds > 0) {
                 cpu += 100.0 * double(now.cpuUsec - std::min(now.cpuUsec, before->cpuUsec)) / (seconds * 1e6);
                 if (now.hasIo && before->hasIo) {
-                    read += (now.readBytes - std::min(now.readBytes, before->readBytes)) / seconds;
-                    write += (now.writeBytes - std::min(now.writeBytes, before->writeBytes)) / seconds;
+                    const double span = (now.readAt - before->readAt) / 1000.0;
+                    if (span > 0) {
+                        read += (now.readBytes - std::min(now.readBytes, before->readBytes)) / span;
+                        write += (now.writeBytes - std::min(now.writeBytes, before->writeBytes)) / span;
+                    }
                 } else {
                     ioKnown = false;
                 }

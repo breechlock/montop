@@ -22,12 +22,12 @@
 // Stands in for NVIDIA's library.
 class FakeNvml : public gpu::Nvml {
 public:
-    int calls = 0;
+    int calls = 0, busyReads = 0, sensorReads = 0;
     void *device(const QString &pci) override { ++calls; return pci == "0000:01:00.0" ? this : nullptr; }
     QString name(void *) override { return "GeForce GTX 1080"; }
-    double busy(void *) override { return 0.42; }
+    double busy(void *) override { ++busyReads; return 0.42; }
     bool memory(void *, double &used, double &total) override { used = 1 << 30; total = 8.0 * (1 << 30); return true; }
-    double temperature(void *) override { return 49; }
+    double temperature(void *) override { ++sensorReads; return 49; }
     double watts(void *) override { return 9.8; }
     double mhz(void *) override { return 1733; }
     double fan(void *) override { return 35; }
@@ -223,6 +223,9 @@ private slots:
         check(qPrintable(user + "app.slice/superwhisper.service"), "service:superwhisper", "service", "superwhisper");
         check(qPrintable(user + "session.slice/wayland-wm@hyprland.desktop.service"),
               "service:wayland-wm@hyprland.desktop", "service", "wayland-wm@hyprland.desktop");
+        // Started over D-Bus: the bus address and instance change each launch.
+        check(qPrintable(user + "app.slice/dbus-:1.1-org.gnome.Nautilus@2.service"), "service:org.gnome.Nautilus", "service",
+              "org.gnome.Nautilus");
         check("/system.slice/NetworkManager.service", "system:NetworkManager", "system", "NetworkManager");
         check("/init.scope", "system:systemd", "system", "systemd");
         check("/user.slice/user-1000.slice/session-1.scope", "session", "session", "session");
@@ -241,6 +244,48 @@ private slots:
         QCOMPARE(names.name("foot"), QString("My Foot")); // The user's own entry wins.
         QCOMPARE(names.name("org.gnome.nautilus"), QString("Files"));
         QVERIFY(names.name("missing").isEmpty());
+    }
+
+    void namesOtherDesktopsComponents()
+    {
+        QCOMPARE(apps::componentName("org.gnome.Shell"), QString("GNOME Shell"));
+        QCOMPARE(apps::componentName("org.gnome.SettingsDaemon.Power"), QString("GNOME Settings (Power)"));
+        QVERIFY(apps::componentName("org.gnome.Nautilus").isEmpty());
+
+        QTemporaryDir root;
+        const QString proc = root.filePath("proc"), sys = root.filePath("sys");
+        const QString user = "/user.slice/user-1000.slice/user@1000.service/";
+        write(proc + "/meminfo", "MemTotal: 1000 kB\nMemAvailable: 600 kB\n");
+        write(proc + "/stat", "cpu  0 0 0 0 0 0 0 0\ncpu0 0 0 0 0 0 0 0 0\n");
+        write(root.filePath("share/applications/org.gnome.Nautilus.desktop"), "[Desktop Entry]\nName=Files\n");
+        const QList<QPair<int, QString>> units{
+            {100, user + "app.slice/dbus-:1.1-org.gnome.Nautilus@2.service"},
+            {101, user + "session.slice/org.gnome.Shell@user.service"},
+            {102, user + "session.slice/org.gnome.SettingsDaemon.Power.service"},
+            {103, user + "app.slice/app-gnome-org.gnome.SettingsDaemon.DiskUtilityNotify-2926.scope"},
+            {104, user + "app.slice/helper@main.service"},
+            {105, "/system.slice/system-getty.slice/getty@tty1.service"},
+        };
+        for (const auto &[pid, cgroup] : units) {
+            write(proc + QString("/%1/stat").arg(pid), pidStat(pid, "x", 0));
+            write(proc + QString("/%1/cgroup").arg(pid), "0::" + cgroup.toUtf8() + "\n");
+        }
+        const QByteArray home = qgetenv("XDG_DATA_HOME"), dirs = qgetenv("XDG_DATA_DIRS");
+        qputenv("XDG_DATA_HOME", root.filePath("share").toUtf8());
+        qputenv("XDG_DATA_DIRS", root.filePath("share").toUtf8());
+        Monitor monitor(proc, sys);
+        qputenv("XDG_DATA_HOME", home);
+        qputenv("XDG_DATA_DIRS", dirs);
+        QHash<QString, QString> names;
+        for (const GroupInfo &g : monitor.groupList())
+            names.insert(g.units.value(0), g.name);
+        QCOMPARE(names.value("dbus-:1.1-org.gnome.Nautilus@2.service"), QString("Files"));
+        QCOMPARE(names.value("org.gnome.Shell@user.service"), QString("GNOME Shell"));
+        QCOMPARE(names.value("org.gnome.SettingsDaemon.Power.service"), QString("GNOME Settings (Power)"));
+        QCOMPARE(names.value("app-gnome-org.gnome.SettingsDaemon.DiskUtilityNotify-2926.scope"),
+                 QString("GNOME Settings (DiskUtilityNotify)"));
+        QCOMPARE(names.value("helper@main.service"), QString("helper")); // No entry: the template's name.
+        QCOMPARE(names.value("getty@tty1.service"), QString("getty@tty1")); // System services keep theirs.
     }
 
     void modelGroupsAndExpands()
@@ -518,6 +563,15 @@ private slots:
         const auto usage = gpus.nvidiaProcesses();
         QCOMPARE(usage.value(4398).percent, 12.5);
         QCOMPARE(usage.value(4398).memory, quint64(221 << 20));
+        // Busy every sample; the slower facts once a second, kept between.
+        gpus.sample(1250);
+        gpus.sample(1500);
+        QCOMPARE(fake->busyReads, 3);
+        QCOMPARE(fake->sensorReads, 1);
+        QCOMPARE(gpus.devices()[2].temperature, 49.0);
+        gpus.sample(2000);
+        QCOMPARE(fake->sensorReads, 2);
+        QCOMPARE(fake->calls, 1); // The handle is looked up once.
 
         const gpu::Device &apple = devices[3];
         QCOMPARE(apple.name, QString("Apple GPU"));

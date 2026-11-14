@@ -23,6 +23,10 @@ Identity classify(const QString &cgroupPath);
 // systemd escapes unit names byte by byte as \xNN ("xdg\x2dterminal").
 QString unescape(const QString &name);
 
+// A name for a desktop's own component that has no desktop entry of its
+// own: GNOME's and KDE's shells and helpers. Empty for anything else.
+QString componentName(const QString &id);
+
 // Display names from the desktop entries in the XDG data directories, keyed
 // by lowercased file name without ".desktop".
 class DesktopNames {

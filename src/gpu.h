@@ -95,7 +95,9 @@ public:
 private:
     struct Previous {
         qint64 time = -1;
-        double energy = -1;            // µJ
+        double energy = -1;    // µJ
+        void *nvml = nullptr;  // NVML's handle for the device.
+        qint64 sensorsAt = -1; // When NVML's slower facts were last read.
     };
     void discover(const QString &pciIds);
     void sampleDevice(Device &device, Previous &previous, qint64 nowMs);

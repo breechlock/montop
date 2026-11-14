@@ -52,6 +52,16 @@ Identity classify(const QString &cgroupPath) {
             return {"app:" + id, id, "app", unit};
     }
 
+    // An app or service started over D-Bus by dbus-broker, as GNOME starts
+    // Files: "dbus-:1.1-org.gnome.Nautilus@2.service". The bus address and
+    // instance change every launch; the D-Bus name is what it is.
+    static const QRegularExpression dbus("^dbus-:[0-9.]+-(.+)@[0-9]+\\.service$");
+    const QRegularExpressionMatch activated = dbus.match(unit);
+    if (user && activated.hasMatch()) {
+        const QString id = unescape(activated.captured(1));
+        return {"service:" + id, id, "service", unit};
+    }
+
     if (unit.endsWith(".service")) {
         const QString id = unescape(unit.chopped(8));
         return user ? Identity{"service:" + id, id, "service", unit} : Identity{"system:" + id, id, "system", unit};
@@ -63,6 +73,25 @@ Identity classify(const QString &cgroupPath) {
     if (session.match(unit).hasMatch())
         return {"session", "session", "session", unit};
     return {"other:" + unescape(unit), unescape(unit), "other", unit};
+}
+
+QString componentName(const QString &id) {
+    static const QHash<QString, QString> names{
+        {"org.gnome.Shell", "GNOME Shell"},
+        {"org.gnome.Shell.Notifications", "GNOME Shell notifications"},
+        {"org.gnome.ScreenSaver", "GNOME screen saver"},
+        {"gnome-session-manager", "GNOME Session"},
+        {"plasma-plasmashell", "Plasma Shell"},
+        {"plasma-kwin_wayland", "KWin"},
+        {"plasma-kwin_x11", "KWin"},
+    };
+    const QString name = names.value(id);
+    if (!name.isEmpty())
+        return name;
+    // GNOME's settings daemon runs as a service per plugin.
+    if (id.startsWith("org.gnome.SettingsDaemon.") && id.size() > 25)
+        return "GNOME Settings (" + id.mid(25) + ")";
+    return {};
 }
 
 DesktopNames::DesktopNames(const QStringList &directories) {

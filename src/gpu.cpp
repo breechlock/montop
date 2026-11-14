@@ -398,10 +398,13 @@ void Gpus::sampleDevice(Device &d, Previous &previous, qint64 nowMs) {
     // A discrete GPU on a laptop sleeps when nothing uses it, and reading
     // its counters (or asking NVML) would wake it and drain the battery.
     d.asleep = readLine(d.path + "/power/runtime_status") == "suspended";
-    d.busy = d.mhz = d.temperature = d.watts = d.fan = -1;
-    d.memoryUsed = d.appMemory = -1;
     d.note.clear();
+    auto clear = [&] {
+        d.busy = d.mhz = d.temperature = d.watts = d.fan = -1;
+        d.memoryUsed = d.appMemory = -1;
+    };
     if (d.asleep) {
+        clear();
         previous = {};
         return;
     }
@@ -410,17 +413,27 @@ void Gpus::sampleDevice(Device &d, Previous &previous, qint64 nowMs) {
 
     if (d.driver == "nvidia") {
         Nvml *api = nvml();
-        void *handle = api && !d.pci.isEmpty() ? api->device(d.pci) : nullptr;
+        if (!previous.nvml && api && !d.pci.isEmpty())
+            previous.nvml = api->device(d.pci);
+        void *handle = previous.nvml;
         if (!handle) {
+            clear();
             d.note = tr("Its driver reports usage only through NVIDIA's NVML library, which Vitals couldn't load.");
             d.perApp = false;
             return;
         }
         d.perApp = true;
-        const QString name = api->name(handle);
-        if (!name.isEmpty())
-            d.name = name.startsWith("NVIDIA") ? name : "NVIDIA " + name;
         d.busy = api->busy(handle);
+        // Each NVML call costs about a tenth of a millisecond, and these
+        // change slowly: once a second is plenty, against four for busy.
+        if (previous.sensorsAt >= 0 && nowMs - previous.sensorsAt < 1000)
+            return;
+        if (previous.sensorsAt < 0) {
+            const QString name = api->name(handle);
+            if (!name.isEmpty())
+                d.name = name.startsWith("NVIDIA") ? name : "NVIDIA " + name;
+        }
+        previous.sensorsAt = nowMs;
         double used = 0, total = 0;
         if (api->memory(handle, used, total)) {
             d.memoryUsed = used;
@@ -432,6 +445,7 @@ void Gpus::sampleDevice(Device &d, Previous &previous, qint64 nowMs) {
         d.fan = api->fan(handle);
         return;
     }
+    clear();
 
     auto glob = [](const QString &dir, const QString &pattern, const QString &tail) {
         QStringList found;
@@ -518,11 +532,10 @@ void Gpus::setClientTotals(const QHash<QString, QHash<QString, double>> &shares,
 
 QHash<int, ProcessUsage> Gpus::nvidiaProcesses() {
     QHash<int, ProcessUsage> usage;
-    for (const Device &d : m_devices) {
-        if (d.driver != "nvidia" || d.asleep || !d.perApp || !nvml())
-            continue;
-        void *handle = nvml()->device(d.pci);
-        if (!handle)
+    for (int i = 0; i < m_devices.size(); ++i) {
+        const Device &d = m_devices[i];
+        void *handle = m_previous[i].nvml;
+        if (d.driver != "nvidia" || d.asleep || !d.perApp || !handle || !nvml())
             continue;
         const auto found = nvml()->processes(handle);
         for (auto it = found.begin(); it != found.end(); ++it) {

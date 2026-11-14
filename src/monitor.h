@@ -232,6 +232,7 @@ private:
         quint64 ticks = 0;
         procfs::PidIo io;
         bool hasIo = false;
+        qint64 ioAt = -1; // When io was read (m_clock ms).
         QString comm, command, name, cgroup;
     };
     QHash<int, PidHistory> m_prevPids;
@@ -246,6 +247,8 @@ private:
         quint64 cpuUsec = 0;
         quint64 readBytes = 0, writeBytes = 0;
         bool hasIo = false;
+        quint64 held = 0;     // From memory.stat.
+        qint64 readAt = -1;   // When memory.stat and io.stat were read (m_clock ms).
     };
     QHash<QString, CgroupCounters> m_prevCgroups;
     QSet<QString> m_physicalDevices; // "major:minor" of the disks listed.
