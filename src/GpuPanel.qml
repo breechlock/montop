@@ -17,8 +17,11 @@ Panel {
     function facts(gpu) {
         translator.language
         const parts = []
+        // Intel reports 0 MHz while the GPU is powered down between frames.
         if (gpu.mhz > 0)
             parts.push(qsTr("%1 GHz").arg((gpu.mhz / 1000).toLocaleString(Qt.locale(), 'f', 2)))
+        else if (gpu.mhz === 0)
+            parts.push(qsTr("idle"))
         if (gpu.temperature >= 0)
             parts.push(Math.round(gpu.temperature) + " °C")
         if (gpu.watts >= 0)
@@ -93,15 +96,16 @@ Panel {
                     }
                 }
 
-                // Its own memory where it has some; otherwise what the apps'
-                // GPU buffers hold of the memory it shares with the CPU.
+                // Its own memory where it has some; otherwise, for a GPU that
+                // uses the computer's RAM, what the apps' GPU buffers take of it.
+                // Rows hold their place, so the graph above never jumps.
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
-                    visible: !section.gpu.asleep && (section.gpu.memoryTotal > 0 || section.gpu.appMemory > 0)
+                    visible: !section.gpu.asleep && (section.gpu.memoryTotal > 0 || section.gpu.appMemory >= 0)
 
                     Label {
-                        text: section.gpu.memoryTotal > 0 ? qsTr("Memory") : qsTr("Apps hold")
+                        text: qsTr("Memory")
                         color: theme.colors.dark_foreground
                         elide: Text.ElideRight
                     }
@@ -116,14 +120,15 @@ Panel {
                         horizontalAlignment: Text.AlignRight
                         text: section.gpu.memoryTotal > 0
                               ? qsTr("%1 of %2").arg(monitor.bytes(section.gpu.memoryUsed)).arg(monitor.bytes(section.gpu.memoryTotal))
-                              : monitor.bytes(section.gpu.appMemory)
+                              : qsTr("%1 in RAM").arg(monitor.bytes(section.gpu.appMemory))
                         color: theme.colors.foreground
                     }
                 }
 
                 Label {
                     Layout.fillWidth: true
-                    visible: text.length > 0 && !section.gpu.asleep
+                    visible: !section.gpu.asleep && (section.gpu.mhz >= 0 || section.gpu.temperature >= 0
+                                                    || section.gpu.watts >= 0 || section.gpu.fan >= 0)
                     text: root.facts(section.gpu)
                     color: theme.colors.dark_foreground
                     elide: Text.ElideRight

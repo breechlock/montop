@@ -143,14 +143,16 @@ QStringList gpuLines(const Monitor &monitor) {
             parts << QString("%1% busy").arg(qRound(d.busy * 100));
         if (d.mhz > 0)
             parts << QString("%1 GHz").arg(d.mhz / 1000, 0, 'f', 2);
+        else if (d.mhz == 0)
+            parts << "idle";
         if (d.temperature >= 0)
             parts << QString("%1 °C").arg(qRound(d.temperature));
         if (d.watts >= 0)
             parts << QString("%1 W").arg(d.watts, 0, 'f', 1);
         if (d.memoryTotal > 0 && d.memoryUsed >= 0)
             parts << QString("memory %1 of %2").arg(bytes(d.memoryUsed), bytes(d.memoryTotal));
-        else if (d.appMemory > 0)
-            parts << QString("apps hold %1").arg(bytes(d.appMemory));
+        else if (d.appMemory >= 0)
+            parts << QString("memory %1 in RAM").arg(bytes(d.appMemory));
         if (d.fan >= 0)
             parts << QString("fan %1%").arg(qRound(d.fan));
         if (!d.note.isEmpty())
