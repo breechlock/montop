@@ -4,7 +4,7 @@
 See what your machine is doing, find out what caused the spike you just
 missed, and pause the app hogging your CPU instead of killing it.
 
-![Vitals on Omarchy's Tokyo Night theme: CPU, memory, disk, and network graphs, with apps grouped by what you launched](docs/screenshots/overview.png)
+![Vitals on Omarchy's Tokyo Night theme: CPU, GPU, memory, disk, and network graphs, with apps grouped by what you launched](docs/screenshots/overview.png)
 
 Vitals is in the spirit of htop, bpytop, and btop, but built for the Omarchy
 desktop: one keyboard-driven window, drawn on the GPU, following your theme,
