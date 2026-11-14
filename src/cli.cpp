@@ -489,7 +489,7 @@ QString cliSummary() {
            "  pause <app>          Freeze every process in an app until you resume it\n"
            "  resume <app>         Resume a paused app\n"
            "  limit <app> <%|off>  Cap an app's CPU in percent of one core, until logout\n"
-           "  run -- <command>     Run a command and report its time, CPU, peak memory, and disk IO\n"
+           "  run <command>        Run a command and report its time, CPU, peak memory, and disk IO\n"
            "  skill [install]      Print the skill for coding agents, or install it";
 }
 

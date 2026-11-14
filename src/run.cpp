@@ -163,14 +163,30 @@ int runCommand(const QStringList &arguments) {
         "as it was, and vitals exits with the command's exit code.");
     parser.addHelpOption();
     parser.addPositionalArgument("run", "", "run");
-    parser.addPositionalArgument("command", "The command and its arguments, after --", "-- <command> [args...]");
+    parser.addPositionalArgument("command", "The command and its arguments", "<command> [args...]");
     parser.addOption({"json", "Report as JSON (still on stderr)"});
     parser.addOption({"interval", "Milliseconds between samples of memory and CPU peaks (default 250)", "ms", "250"});
-    parser.process(arguments);
+    // Only Vitals' own options come before the command; from its name on,
+    // everything is the command's, so `vitals run make -j8` works without --.
+    QStringList own = arguments.mid(0, 2), command;
+    for (int i = 2; i < arguments.size(); ++i) {
+        const QString &a = arguments[i];
+        if (a == "--") {
+            command = arguments.mid(i + 1);
+            break;
+        }
+        if (!a.startsWith('-')) {
+            command = arguments.mid(i);
+            break;
+        }
+        own << a;
+        if (a == "--interval" && i + 1 < arguments.size())
+            own << arguments[++i];
+    }
+    parser.process(own);
 
-    const QStringList command = parser.positionalArguments().mid(1);
     if (command.isEmpty()) {
-        fprintf(stderr, "Name a command: vitals run -- make -j8\n");
+        fprintf(stderr, "Name a command: vitals run make -j8\n");
         return 1;
     }
     bool ok = false;

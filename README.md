@@ -18,7 +18,7 @@ bpytop, and btop.
   apps caused it, and click to see the app list as it was then. `[` and `]`
   step back and forward through the last ten minutes; `Esc` returns to now.
   No more catching a spike only after it's gone.
-- **Measure a command**: `vitals run -- make -j8` runs it and then reports its
+- **Measure a command**: `vitals run make -j8` runs it and then reports its
   time, CPU, peak memory, disk IO, and how long it waited on CPU, memory, and
   disk, counting every process it started, even ones long gone. Like `time`,
   but right for builds and test suites that fan out into hundreds of processes.
@@ -111,8 +111,8 @@ vitals snapshot --json --sort memory --top 20
 vitals apps --json         # every app and service, with its PIDs and top processes
 vitals pause brave         # freeze an app until: vitals resume brave
 vitals limit brave 200     # cap it at two cores until logout; vitals limit brave off
-vitals run -- make -j8     # run a command, then report what it used
-vitals run --json -- cargo build
+vitals run make -j8     # run a command, then report what it used
+vitals run --json cargo build
 vitals skill install       # teach Claude Code and Codex to use Vitals
 ```
 

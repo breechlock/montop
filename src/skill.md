@@ -29,7 +29,7 @@ needs a display.
 
 ## Measuring a command
 
-`vitals run --json -- <command>` runs it (as the person would, same directory
+`vitals run --json <command>` runs it (as the person would, same directory
 and environment) and prints a JSON report on stderr when it ends: wall time,
 CPU seconds and cores used, peak memory, disk bytes, seconds spent waiting on
 CPU, memory, and disk, and the most processes at once. It counts every process

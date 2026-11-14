@@ -1,5 +1,5 @@
 pkgname=vitals
-pkgver=0.2.0
+pkgver=0.3.0
 pkgrel=1
 pkgdesc='See what your system is doing: CPU, memory, disks, network, and processes'
 arch=('x86_64' 'aarch64')
