@@ -38,7 +38,15 @@ specific to Vitals.
 ## Rules
 
 - Never change Omarchy or Hyprland config. Never run `vitals skill install`
-  without the user's approval: it writes into `~/.agents` and `~/.claude`.
+  or `remove` on the user's machine without approval: they change `~/.agents`
+  and the agents' skills folders. Test them with a temporary home, as
+  `linksAndRemovesTheSkill` does.
+- The agent skill is `src/skill.md`: bundled in the binary (`vitals skill`
+  prints it) and installed by the package as
+  `/usr/share/vitals/skills/vitals/SKILL.md`. A package never writes into home
+  folders; `vitals skill install` links the packaged copy per user, into the
+  same folders Omarchy links its own skills into, and leaves anything that
+  isn't Vitals' alone.
 - Pause and limit act only on `app.slice` and `background.slice` units, never
   on `session.slice`, system services, or the unit Vitals runs in. Keep the
   undo-on-close behaviour of the window.

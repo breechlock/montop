@@ -51,8 +51,13 @@ vitals run: make -j8
 ```
 
 **Built for agents, too.** Every command works without a display and speaks
-JSON, and `vitals skill install` teaches Claude Code and Codex to use it: ask
+JSON, and `vitals skill install` teaches your coding agents to use it: ask
 your agent why the machine is slow, and it can answer with the app, not a PID.
+The package ships the skill in `/usr/share/vitals/skills/vitals`, and
+`vitals skill install` links it, the way Omarchy links its own skills, into
+`~/.agents/skills` and the skills folder of each agent you use (Claude Code,
+Codex, Pi, Gemini, Hermes), so it stays current with every upgrade.
+`vitals skill remove` takes the links out again.
 
 **At home on Omarchy.** Vitals follows the current theme live, the whole
 palette, light or dark, along with Hyprland's window rounding, the desktop's
@@ -113,7 +118,7 @@ vitals apps --json              # every app and service, with its PIDs and top p
 vitals pause steam              # freeze an app until: vitals resume steam
 vitals limit omacut 200         # cap it at two cores until logout; vitals limit omacut off
 vitals run cargo build          # run a command, then report what it used
-vitals skill install            # teach Claude Code and Codex to use Vitals
+vitals skill install            # teach your coding agents to use Vitals (skill remove undoes it)
 ```
 
 Commands need no display. Each takes `--json`, exits 0 or 1 (`vitals run`

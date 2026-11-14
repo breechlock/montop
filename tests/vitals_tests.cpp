@@ -413,6 +413,52 @@ private slots:
         QCOMPARE(model->data(model->index(model->rowOf("g:app:build")), ProcessModel::CpuRole).toDouble(), 0.0);
     }
 
+    void linksAndRemovesTheSkill()
+    {
+        QTemporaryDir dir;
+        const QString home = dir.path() + "/home", packaged = dir.path() + "/usr/share/vitals/skills/vitals";
+        const QByteArray text = "---\nname: vitals\ndescription: test\n---\n";
+        QDir().mkpath(home + "/.claude");
+        QDir().mkpath(home + "/.codex/skills/vitals");  // The user's own skill by that name.
+        write(home + "/.codex/skills/vitals/SKILL.md", "---\nname: mine\n---\n");
+        QDir().mkpath(packaged);
+        write(packaged + "/SKILL.md", text);
+
+        // Packaged: links in the shared folder and each agent that is set up.
+        SkillChanges changes = installSkill(home, packaged, text);
+        QCOMPARE(QFileInfo(home + "/.agents/skills/vitals").symLinkTarget(), packaged);
+        QCOMPARE(QFileInfo(home + "/.claude/skills/vitals").symLinkTarget(), packaged);
+        QVERIFY(!QFileInfo(home + "/.codex/skills/vitals").isSymLink());
+        QVERIFY(!QFileInfo::exists(home + "/.pi"));
+        QCOMPARE(changes.done.size(), 2);
+        QCOMPARE(changes.errors.size(), 1);
+        QVERIFY(installSkill(home, packaged, text).done.isEmpty());
+
+        // Removing takes out only Vitals' links.
+        changes = removeSkill(home, packaged);
+        QCOMPARE(changes.done.size(), 2);
+        QVERIFY(!QFileInfo(home + "/.claude/skills/vitals").isSymLink());
+        QVERIFY(QFileInfo::exists(home + "/.codex/skills/vitals/SKILL.md"));
+        QDir(home + "/.codex").removeRecursively();
+
+        // From source: a copy, linked to; and 0.3.0's relative link is taken over.
+        QDir().mkpath(home + "/.claude/skills");
+        QVERIFY(QFile::link("../../.agents/skills/vitals", home + "/.claude/skills/vitals"));
+        changes = installSkill(home, dir.path() + "/nowhere", text);
+        QVERIFY(changes.errors.isEmpty());
+        QVERIFY(QFileInfo(home + "/.agents/skills/vitals").isDir());
+        QVERIFY(!QFileInfo(home + "/.agents/skills/vitals").isSymLink());
+        QCOMPARE(QFileInfo(home + "/.claude/skills/vitals").symLinkTarget(), home + "/.agents/skills/vitals");
+        changes = removeSkill(home, packaged);
+        QCOMPARE(changes.done.size(), 2);
+        QVERIFY(!QFileInfo::exists(home + "/.agents/skills/vitals"));
+        QVERIFY(!QFileInfo(home + "/.claude/skills/vitals").isSymLink());
+
+        // A link left dangling by an uninstalled package is cleaned up.
+        QVERIFY(QFile::link(dir.path() + "/gone", home + "/.claude/skills/vitals"));
+        QCOMPARE(removeSkill(home, packaged).done.size(), 1);
+    }
+
     void readsWhatACgroupUsed()
     {
         QTemporaryDir dir;

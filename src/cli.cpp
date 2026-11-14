@@ -352,40 +352,71 @@ int appsCommand(const QStringList &arguments) {
     return 0;
 }
 
-// As Hype and the hey and basecamp tools do: one shared copy, linked into
-// Claude Code, found directly by Codex.
+// Where coding agents look for skills, as Omarchy links its own: the shared
+// ~/.agents/skills (Codex and others), always, then each agent's own folder,
+// only for agents that are set up.
+QStringList skillFolders(const QString &home, bool onlySetUp) {
+    QStringList folders{".agents/skills"};
+    const QList<QPair<QString, QString>> agents{
+        {".claude", ".claude/skills"},       {".codex", ".codex/skills"},
+        {".pi/agent", ".pi/agent/skills"},   {".gemini/config", ".gemini/config/skills"},
+        {".hermes", ".hermes/skills"}};
+    for (const auto &[agent, folder] : agents)
+        if (!onlySetUp || QFileInfo(home + "/" + agent).isDir())
+            folders << folder;
+    return folders;
+}
+
+QString tilde(const QString &home, const QString &path) {
+    return path.startsWith(home + "/") ? "~" + path.mid(home.size()) : path;
+}
+
+// A copy written by `vitals skill install` without the package: a folder
+// holding only the Vitals SKILL.md.
+bool isSkillCopy(const QString &path) {
+    const QDir dir(path);
+    if (QFileInfo(path).isSymLink() || !dir.exists()
+        || dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden) != QStringList{"SKILL.md"})
+        return false;
+    QFile file(dir.filePath("SKILL.md"));
+    return file.open(QIODevice::ReadOnly) && file.read(64).contains("\nname: vitals\n");
+}
+
+// Links Vitals made: to the packaged skill, or to the copy (0.3.0 linked
+// ~/.claude/skills to it with a relative link, which resolves the same).
+bool isSkillLink(const QString &home, const QString &path, const QString &packaged) {
+    const QFileInfo info(path);
+    if (!info.isSymLink())
+        return false;
+    const QString target = info.symLinkTarget();
+    return target == packaged || target == home + "/.agents/skills/vitals";
+}
+
 int skill(const QStringList &arguments) {
-    Command command("skill", "Print the agent skill, or install it for your coding agents with: skill install.");
-    command.parser.addPositionalArgument("install", "Copy to ~/.agents/skills/vitals and link into ~/.claude/skills", "[install]");
+    Command command("skill", "Print the agent skill, or set it up for your coding agents with: skill install.");
+    command.parser.addPositionalArgument("action", "install: link the skill into ~/.agents/skills and each coding agent's skills. "
+                                                   "remove: take those links out again.", "[install|remove]");
     command.parser.process(arguments);
     QFile bundled(":/skill.md");
     if (!bundled.open(QIODevice::ReadOnly))
         return 1;
     const QByteArray text = bundled.readAll();
-    if (command.argument(1).isEmpty()) {
+    const QString action = command.argument(1);
+    if (action.isEmpty()) {
         fputs(text.constData(), stdout);
         return 0;
     }
-    if (command.argument(1) != "install")
-        return fail("Use vitals skill to print the skill, or vitals skill install.");
-    const QDir home = QDir::home();
-    const QString directory = home.filePath(".agents/skills/vitals");
-    QSaveFile file(directory + "/SKILL.md");
-    if (!QDir().mkpath(directory) || !file.open(QIODevice::WriteOnly) || file.write(text) < 0 || !file.commit())
-        return fail("Could not write " + file.fileName());
-    print(stdout, "Installed " + file.fileName());
-    if (!home.exists(".claude"))
-        return 0;
-    const QString link = home.filePath(".claude/skills/vitals");
-    const QFileInfo existing(link);
-    if (existing.isSymLink())
-        QFile::remove(link);
-    else if (existing.exists())
-        return fail(link + " exists and is not a link; leaving it alone.");
-    if (!home.mkpath(".claude/skills") || !QFile::link("../../.agents/skills/vitals", link))
-        return fail("Could not link " + link);
-    print(stdout, "Linked " + link);
-    return 0;
+    if (action != "install" && action != "remove")
+        return fail("Use vitals skill to print the skill, vitals skill install, or vitals skill remove.");
+    const SkillChanges changes = action == "install" ? installSkill(QDir::homePath(), PackagedSkill, text)
+                                                     : removeSkill(QDir::homePath(), PackagedSkill);
+    for (const QString &line : changes.done)
+        print(stdout, line);
+    for (const QString &line : changes.errors)
+        print(stderr, "vitals: " + line);
+    if (changes.done.isEmpty() && changes.errors.isEmpty())
+        print(stdout, action == "install" ? "The skill is already set up." : "No Vitals skill to remove.");
+    return changes.errors.isEmpty() ? 0 : 1;
 }
 
 int help(const QStringList &arguments) {
@@ -490,7 +521,7 @@ QString cliSummary() {
            "  resume <app>         Resume a paused app\n"
            "  limit <app> <%|off>  Cap an app's CPU in percent of one core, until logout\n"
            "  run <command>        Run a command and report its time, CPU, peak memory, and disk IO\n"
-           "  skill [install]      Print the skill for coding agents, or install it";
+           "  skill [install|remove] The skill for coding agents: print, set up, or remove it";
 }
 
 bool isCliCommand(const QString &word) {
@@ -505,4 +536,88 @@ int runCli(const QStringList &arguments) {
            : command == "run"    ? runCommand(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
+}
+
+SkillChanges installSkill(const QString &home, const QString &packaged, const QByteArray &text) {
+    SkillChanges changes;
+    const QString shared = home + "/.agents/skills/vitals";
+    const bool fromPackage = QFileInfo::exists(packaged + "/SKILL.md");
+    QString source = packaged;
+    if (!fromPackage) {
+        // Without the package (a build from source), the shared folder holds
+        // a copy, and every agent links to that.
+        source = shared;
+        const QFileInfo sharedInfo(shared);
+        if (sharedInfo.isSymLink() && (!sharedInfo.exists() || isSkillLink(home, shared, packaged)))
+            QFile::remove(shared);
+        QSaveFile file(shared + "/SKILL.md");
+        QFile existing(shared + "/SKILL.md");
+        const bool same = existing.open(QIODevice::ReadOnly) && existing.readAll() == text;
+        existing.close();
+        if (QFileInfo::exists(shared) && !isSkillCopy(shared)) {
+            changes.errors << tilde(home, shared) + " isn't Vitals' skill; leaving it alone.";
+            return changes;
+        }
+        if (!same) {
+            if (!QDir().mkpath(shared) || !file.open(QIODevice::WriteOnly) || file.write(text) < 0 || !file.commit()) {
+                changes.errors << "Couldn't write " + tilde(home, file.fileName());
+                return changes;
+            }
+            changes.done << "Wrote " + tilde(home, shared + "/SKILL.md");
+        }
+    }
+    for (const QString &folder : skillFolders(home, true)) {
+        const QString link = home + "/" + folder + "/vitals";
+        if (link == source)
+            continue;
+        const QFileInfo info(link);
+        if (info.isSymLink()) {
+            if (info.symLinkTarget() == source)
+                continue;
+            // A working link elsewhere is the user's own; a dangling one isn't anything.
+            if (info.exists() && !isSkillLink(home, link, packaged)) {
+                changes.errors << tilde(home, link) + " isn't Vitals' skill; leaving it alone.";
+                continue;
+            }
+            QFile::remove(link);
+        } else if (info.exists()) {
+            if (!isSkillCopy(link)) {
+                changes.errors << tilde(home, link) + " isn't Vitals' skill; leaving it alone.";
+                continue;
+            }
+            QDir(link).removeRecursively();
+        }
+        if (!QDir().mkpath(home + "/" + folder) || !QFile::link(source, link)) {
+            changes.errors << "Couldn't link " + tilde(home, link);
+            continue;
+        }
+        changes.done << "Linked " + tilde(home, link) + " → " + tilde(home, source);
+    }
+    return changes;
+}
+
+SkillChanges removeSkill(const QString &home, const QString &packaged) {
+    SkillChanges changes;
+    for (const QString &folder : skillFolders(home, false)) {
+        const QString path = home + "/" + folder + "/vitals";
+        const QFileInfo info(path);
+        if (!info.isSymLink() && !info.exists())
+            continue;
+        if (isSkillLink(home, path, packaged) || (info.isSymLink() && !info.exists())) {
+            // A link that points nowhere is one Vitals made before it was
+            // uninstalled, or the copy it pointed to is gone.
+            if (QFile::remove(path))
+                changes.done << "Removed " + tilde(home, path);
+            else
+                changes.errors << "Couldn't remove " + tilde(home, path);
+        } else if (isSkillCopy(path)) {
+            if (QDir(path).removeRecursively())
+                changes.done << "Removed " + tilde(home, path);
+            else
+                changes.errors << "Couldn't remove " + tilde(home, path);
+        } else {
+            changes.errors << tilde(home, path) + " isn't Vitals' skill; leaving it alone.";
+        }
+    }
+    return changes;
 }
