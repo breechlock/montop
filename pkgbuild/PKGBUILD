@@ -1,7 +1,7 @@
 pkgname=vitals
 pkgver=0.3.0
 pkgrel=1
-pkgdesc='See what your system is doing: CPU, memory, disks, network, and processes'
+pkgdesc='A system monitor for Omarchy that shows apps, not just processes'
 arch=('x86_64' 'aarch64')
 license=('MIT')
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland')

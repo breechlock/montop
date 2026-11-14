@@ -51,7 +51,8 @@ int main(int argc, char *argv[]) {
     Translator translator;
     app.installTranslator(&translator);
 
-    Theme theme;
+    // For screenshots and demos: a theme other than the current one.
+    Theme theme(qEnvironmentVariable("VITALS_THEME"));
     // Numbers line up in columns only in a monospaced face, and Omarchy's
     // monospace font is the desktop's voice in every terminal and the bar.
     QFont font(theme.font());

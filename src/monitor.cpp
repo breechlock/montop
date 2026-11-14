@@ -25,9 +25,30 @@ static QString readLine(const QString &path) {
 
 Monitor::Monitor(const QString &procRoot, const QString &sysRoot, QObject *parent)
     : QObject(parent), m_proc(procRoot), m_sys(sysRoot) {
+    // For screenshots and demos: a made-up system instead of this one
+    // (tools/demo writes one), so nothing personal ends up shown.
+    const QString root = qEnvironmentVariable("VITALS_ROOT");
+    if (!root.isEmpty() && procRoot == "/proc" && sysRoot == "/sys") {
+        m_proc = root + "/proc";
+        m_sys = root + "/sys";
+    }
     m_pageSize = sysconf(_SC_PAGESIZE);
-    m_hostname = QSysInfo::machineHostName();
-    m_kernel = QSysInfo::kernelVersion();
+    // From /proc, so a stand-in root under test brings its own.
+    m_hostname = readLine(m_proc + "/sys/kernel/hostname");
+    if (m_hostname.isEmpty())
+        m_hostname = QSysInfo::machineHostName();
+    m_kernel = readLine(m_proc + "/sys/kernel/osrelease");
+    if (m_kernel.isEmpty())
+        m_kernel = QSysInfo::kernelVersion();
+    // A stand-in root can't own its files as other users, so it says who
+    // owns each process in its status file, and names them in its own passwd.
+    if (m_proc != "/proc") {
+        for (const QByteArray &line : readFile(m_proc + "/../etc/passwd").split('\n')) {
+            const QList<QByteArray> f = line.split(':');
+            if (f.size() > 2)
+                m_users.insert(f[2].toUInt(), QString::fromUtf8(f[0]));
+        }
+    }
     for (const QByteArray &line : readFile(m_proc + "/cpuinfo").split('\n')) {
         if (line.startsWith("model name")) {
             m_cpuModel = QString::fromUtf8(line.mid(line.indexOf(':') + 1)).simplified();
@@ -412,8 +433,13 @@ void Monitor::sampleProcesses(double seconds, quint64 cpuTotalDelta) {
         tasks += std::max(1, stat.threads);
 
         struct stat info;
-        if (::stat(QFile::encodeName(base).constData(), &info) == 0)
+        if (m_proc != "/proc") {
+            for (const QByteArray &line : readFile(base + "/status", 4096).split('\n'))
+                if (line.startsWith("Uid:"))
+                    p.user = userName(line.mid(4).simplified().split(' ').value(0).toUInt());
+        } else if (::stat(QFile::encodeName(base).constData(), &info) == 0) {
             p.user = userName(info.st_uid);
+        }
 
         PidHistory history;
         const auto before = m_prevPids.constFind(p.pid);
