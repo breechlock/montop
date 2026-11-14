@@ -27,6 +27,21 @@ needs a display.
 3. Answer with the app first ("Brave is using 3 cores, mostly one tab's
    renderer"), then the process and command line that explains it.
 
+## Measuring a command
+
+`vitals run --json -- <command>` runs it (as the person would, same directory
+and environment) and prints a JSON report on stderr when it ends: wall time,
+CPU seconds and cores used, peak memory, disk bytes, seconds spent waiting on
+CPU, memory, and disk, and the most processes at once. It counts every process
+the command started, even ones that already exited, and exits with the
+command's own code. Use it to answer "how much memory does this build need",
+"is this test suite CPU- or disk-bound", or to compare two flags.
+
+- High `waited_seconds.cpu` with `cpu.average_percent` near the core count:
+  CPU-bound; more parallelism won't help.
+- High `waited_seconds.disk`: disk-bound. High `waited_seconds.memory`: the
+  machine was short on memory and reclaiming.
+
 ## Reading the numbers
 
 - `cpu_percent` is relative to one core: 200 means two cores fully busy. Compare

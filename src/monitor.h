@@ -146,6 +146,8 @@ public:
     // The latest process scan, for the command line.
     const QList<ProcessInfo> &processList() const { return m_processList; }
     const QList<GroupInfo> &groupList() const { return m_groupList; }
+    // The physical disks' "major:minor", for reading a cgroup's io.stat.
+    const QSet<QString> &physicalDevices() const { return m_physicalDevices; }
 
     // Sizes in IEC units, with the decimal separator of the current language.
     Q_INVOKABLE static QString bytes(double value);

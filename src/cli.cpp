@@ -2,6 +2,7 @@
 #include "cli.h"
 
 #include "monitor.h"
+#include "run.h"
 
 #include <QCommandLineParser>
 #include <QDateTime>
@@ -488,11 +489,12 @@ QString cliSummary() {
            "  pause <app>          Freeze every process in an app until you resume it\n"
            "  resume <app>         Resume a paused app\n"
            "  limit <app> <%|off>  Cap an app's CPU in percent of one core, until logout\n"
+           "  run -- <command>     Run a command and report its time, CPU, peak memory, and disk IO\n"
            "  skill [install]      Print the skill for coding agents, or install it";
 }
 
 bool isCliCommand(const QString &word) {
-    return QStringList{"snapshot", "apps", "pause", "resume", "limit", "skill", "help", "--help", "-h"}.contains(word);
+    return QStringList{"snapshot", "apps", "pause", "resume", "limit", "run", "skill", "help", "--help", "-h"}.contains(word);
 }
 
 int runCli(const QStringList &arguments) {
@@ -500,6 +502,7 @@ int runCli(const QStringList &arguments) {
     return command == "snapshot" ? snapshot(arguments)
            : command == "apps"   ? appsCommand(arguments)
            : command == "pause" || command == "resume" || command == "limit" ? control(arguments)
+           : command == "run"    ? runCommand(arguments)
            : command == "skill"  ? skill(arguments)
                                  : help(arguments);
 }

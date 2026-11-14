@@ -8,6 +8,7 @@ HEADERS += \
     src/apps.h \
     src/cli.h \
     src/procfs.h \
+    src/run.h \
     src/monitor.h \
     src/processmodel.h \
     src/sparkline.h \
@@ -18,6 +19,7 @@ SOURCES += \
     src/main.cpp \
     src/apps.cpp \
     src/cli.cpp \
+    src/run.cpp \
     src/procfs.cpp \
     src/monitor.cpp \
     src/processmodel.cpp \

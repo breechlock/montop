@@ -9,6 +9,7 @@
 #include <unistd.h>
 
 #include "apps.h"
+#include "run.h"
 #include "cli.h"
 #include "monitor.h"
 #include "processmodel.h"
@@ -410,6 +411,50 @@ private slots:
         monitor.rewindTo(0);
         QCOMPARE(monitor.rewoundTo(), 0.0);
         QCOMPARE(model->data(model->index(model->rowOf("g:app:build")), ProcessModel::CpuRole).toDouble(), 0.0);
+    }
+
+    void readsWhatACgroupUsed()
+    {
+        QTemporaryDir dir;
+        const QString cg = dir.path();
+        write(cg + "/cpu.stat", "usage_usec 2500000\nuser_usec 2000000\nsystem_usec 500000\n");
+        write(cg + "/memory.current", "4096000\n");
+        write(cg + "/memory.peak", "8192000\n");
+        write(cg + "/memory.stat", "anon 1000\nfile 999999\nshmem 24\nkernel 2000\n");
+        write(cg + "/io.stat", "8:0 rbytes=100 wbytes=200 rios=1\n253:0 rbytes=100 wbytes=200\n");
+        write(cg + "/cpu.pressure", "some avg10=0.00 avg60=0.00 avg300=0.00 total=1500000\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n");
+        write(cg + "/io.pressure", "some avg10=0.00 avg60=0.00 avg300=0.00 total=250000\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=0\n");
+        write(cg + "/pids.peak", "12\n");
+
+        const CgroupUsage u = readCgroupUsage(cg, {"8:0"});
+        QVERIFY(u.ok);
+        QVERIFY(u.hasIo);
+        QCOMPARE(u.cpuUsec, quint64(2500000));
+        QCOMPARE(u.userUsec, quint64(2000000));
+        QCOMPARE(u.ownMemory, quint64(3024)); // anon + shmem + kernel
+        QCOMPARE(u.memoryPeak, quint64(8192000));
+        QCOMPARE(u.readBytes, quint64(100)); // the disk, not the volume on it too
+        QCOMPARE(u.writeBytes, quint64(200));
+        QCOMPARE(u.cpuWaitUsec, quint64(1500000));
+        QCOMPARE(u.ioWaitUsec, quint64(250000));
+        QCOMPARE(u.memoryWaitUsec, quint64(0));
+        QCOMPARE(u.processesPeak, 12);
+        QVERIFY(!readCgroupUsage(cg + "/gone", {}).ok);
+
+        RunReport report;
+        report.command = {"make", "-j8"};
+        report.exitCode = 2;
+        report.seconds = 1.25;
+        report.usage = u;
+        report.ownMemoryPeak = 3024;
+        report.cpuPeak = 350;
+        const QJsonObject json = runJson(report);
+        QCOMPARE(json["exit_code"].toInt(), 2);
+        QCOMPARE(json["cpu"].toObject()["seconds"].toDouble(), 2.5);
+        QCOMPARE(json["cpu"].toObject()["average_percent"].toDouble(), 200.0);
+        QCOMPARE(json["memory"].toObject()["peak_with_cache_bytes"].toDouble(), 8192000.0);
+        QCOMPARE(json["waited_seconds"].toObject()["cpu"].toDouble(), 1.5);
+        QVERIFY(runText(report).contains("Exit       2"));
     }
 
     void monitorSaysWhenProcIsMissing()
