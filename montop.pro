@@ -1,14 +1,14 @@
 QT += core gui qml quick quickcontrols2
 
 CONFIG += c++17 release
-TARGET = vitals
+TARGET = montop
 TEMPLATE = app
 
 # The one place the version is set; a release also sets pkgver in the PKGBUILDs.
 # It reaches the code through a generated header rather than a define, so
 # changing it rebuilds what uses it.
-VERSION = 0.4.2
-VERSION_HEADER = "$${LITERAL_HASH}pragma once" "$${LITERAL_HASH}define VITALS_VERSION \"$$VERSION\""
+VERSION = 0.5.0
+VERSION_HEADER = "$${LITERAL_HASH}pragma once" "$${LITERAL_HASH}define MONTOP_VERSION \"$$VERSION\""
 write_file($$OUT_PWD/version.h, VERSION_HEADER)
 INCLUDEPATH += $$OUT_PWD
 

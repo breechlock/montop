@@ -1,24 +1,24 @@
 ---
-name: vitals-dev
-description: Develop, test, package and release Vitals, the Omarchy system monitor in this repository, and keep it compliant with Omarchy's package repository (omacom/omarchy-pkgs). Use for any change to Vitals' code, QML, translations, packaging, screenshots, README, version, or release. Triggers: vitals, package-check, omarchy-pkgs, release, bump the version, PKGBUILD, screenshots.
+name: montop-dev
+description: Develop, test, package and release Montop, the Omarchy system monitor in this repository, and keep it compliant with Omarchy's package repository (omacom/omarchy-pkgs). Use for any change to Montop' code, QML, translations, packaging, screenshots, README, version, or release. Triggers: montop, package-check, omarchy-pkgs, release, bump the version, PKGBUILD, screenshots.
 ---
 
-# Developing Vitals
+# Developing Montop
 
-Vitals follows Omarchy's own apps (Omacut, Hype, Monologue): C++ and Qt Quick,
+Montop follows Omarchy's own apps (Omacut, Hype, Monologue): C++ and Qt Quick,
 qmake6, one binary, theme and language followed live. The global
 `omarchy-app` skill holds the general conventions; this one holds what is
-specific to Vitals.
+specific to Montop.
 
 ## Layout
 
 - `src/` flat: `monitor.*` (sampling, rewind, pause/limit), `gpu.*` (GPU
   devices, fdinfo parsing, NVML), `processmodel.*`
   (rows and roles for QML), `procfs.*` (parsers), `apps.*` (cgroups and
-  desktop names), `run.*` (`vitals run`), `cli.*` (commands), `theme.*`,
+  desktop names), `run.*` (`montop run`), `cli.*` (commands), `theme.*`,
   `translator.*`, QML panels, `i18n/{en,nl}.json`.
-- `tests/vitals_tests.cpp`: Qt Test, compiles `../src/*.cpp` directly. A new
-  source file goes in `vitals.pro` and `tests/vitals_tests.pro`.
+- `tests/montop_tests.cpp`: Qt Test, compiles `../src/*.cpp` directly. A new
+  source file goes in `montop.pro` and `tests/montop_tests.pro`.
 - `pkgbuild/PKGBUILD`: builds this checkout for `bin/install`.
 - `pkgbuild/omarchy-pkgs/`: the recipe for omacom/omarchy-pkgs, built from
   the GitHub release tarball. It is the source of truth for the PR there.
@@ -26,7 +26,7 @@ specific to Vitals.
 
 ## Loop
 
-1. `bin/build`, then try `build/vitals open` or a CLI command.
+1. `bin/build`, then try `build/montop open` or a CLI command.
 2. `bin/test` after every backend change. All tests must pass.
 3. Every visible string goes through `qsTr`/`tr` and gets a Dutch entry in
    `src/i18n/nl.json`; `shippedCatalogsCoverEveryString` fails otherwise.
@@ -38,18 +38,18 @@ specific to Vitals.
 
 ## Rules
 
-- Never change Omarchy or Hyprland config. Never run `vitals skill install`
+- Never change Omarchy or Hyprland config. Never run `montop skill install`
   or `remove` on the user's machine without approval: they change `~/.agents`
   and the agents' skills folders. Test them with a temporary home, as
   `linksAndRemovesTheSkill` does.
-- The agent skill is `src/skill.md`: bundled in the binary (`vitals skill`
+- The agent skill is `src/skill.md`: bundled in the binary (`montop skill`
   prints it) and installed by the package as
-  `/usr/share/vitals/skills/vitals/SKILL.md`. A package never writes into home
-  folders; `vitals skill install` links the packaged copy per user, into the
+  `/usr/share/montop/skills/montop/SKILL.md`. A package never writes into home
+  folders; `montop skill install` links the packaged copy per user, into the
   same folders Omarchy links its own skills into, and leaves anything that
-  isn't Vitals' alone.
+  isn't Montop' alone.
 - Pause and limit act only on `app.slice` and `background.slice` units, never
-  on `session.slice`, system services, or the unit Vitals runs in. Keep the
+  on `session.slice`, system services, or the unit Montop runs in. Keep the
   undo-on-close behaviour of the window.
 - Screenshots and README examples come from the demo system, never from the
   user's machine: `tools/demo/screenshots.py` under
@@ -71,26 +71,26 @@ specific to Vitals.
   Measure with a harness before and after changing it; it costs about 0.5 ms
   per scan on a desktop with 330 processes.
 - Hardware without a test machine is covered by sysfs/fdinfo fixtures in
-  `tests/vitals_tests.cpp` (`readsGpuDevices`, `monitorPutsGpuUsageDownToApps`,
+  `tests/montop_tests.cpp` (`readsGpuDevices`, `monitorPutsGpuUsageDownToApps`,
   `namesArmMachines`). Apple Silicon (Asahi) reports no GPU usage and no CPU
   temperature; the window says so rather than showing zeros.
 
 ## Version and release
 
-The version is set in `vitals.pro` (`VERSION = x.y.z`) and as `pkgver` in both
+The version is set in `montop.pro` (`VERSION = x.y.z`) and as `pkgver` in both
 PKGBUILDs; `bin/package-check` refuses a mismatch.
 
 1. Set the version in the three places; reset `pkgrel=1`. Update README if
    behaviour changed. `bin/test`, `bin/package-check`. Commit.
-2. Push, then `git tag -a vX.Y.Z -m "Vitals X.Y.Z"` and push the tag. The
-   Release workflow checks the tag against `vitals.pro`, builds and tests it
+2. Push, then `git tag -a vX.Y.Z -m "Montop X.Y.Z"` and push the tag. The
+   Release workflow checks the tag against `montop.pro`, builds and tests it
    in omarchy-pkgs' builder, and publishes the release with generated notes
    and the x86_64 package attached. Rewrite the notes in plain words with
    `gh release edit vX.Y.Z --notes-file ...`.
 3. In `pkgbuild/omarchy-pkgs/`, run `updpkgsums` (delete the downloaded
    tarball afterwards), then `bin/package-check --release` to build exactly
    what will ship. Commit the new checksum.
-4. Once Vitals is in omarchy-pkgs, its `upstream.watch` picks up the GitHub
+4. Once Montop is in omarchy-pkgs, its `upstream.watch` picks up the GitHub
    release on its own and a bot opens the update PR; nothing else is needed.
 
 ## GitHub
@@ -108,14 +108,14 @@ PKGBUILDs; `bin/package-check` refuses a mismatch.
 What their README and CI require, and what the recipe already does:
 
 - One package per PR, branched from `master`, files only under
-  `pkgbuilds/vitals/`: `PKGBUILD`, `vitals.install`, `.omarchy/package.json`.
+  `pkgbuilds/montop/`: `PKGBUILD`, `montop.install`, `.omarchy/package.json`.
   The PR says what the package is and how it was tested.
 - `arch=('x86_64' 'aarch64')`; source pinned to a release tag with its
   sha256; every file owned by root (`install -D`, no vendor tarballs).
 - `.omarchy/package.json`: `"source": "local"`, `"auto_merge": true`, and an
-  `upstream.watch` on `carroarmato0/vitals` with pattern
+  `upstream.watch` on `carroarmato0/montop` with pattern
   `v(?P<version>[0-9]+(?:\.[0-9]+)*)`. Check it with
-  `python build/omarchy-pkgs/helpers/upstream-watch.py check build/omarchy-pkgs/pkgbuilds/vitals`.
+  `python build/omarchy-pkgs/helpers/upstream-watch.py check build/omarchy-pkgs/pkgbuilds/montop`.
 - Not on the fast ring: it is compiled here and links Qt, which their
   `bin/check-fast-ring` refuses. It reaches rc and stable by promotion.
 - A packaging change at the same version bumps `pkgrel`, or it never ships.

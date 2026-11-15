@@ -1,6 +1,6 @@
 name: Package
 
-# Builds and tests Vitals in omarchy-pkgs' own builder, the way that
+# Builds and tests Montop in omarchy-pkgs' own builder, the way that
 # repository's CI will, on x86_64 and natively on Arm (Snapdragon laptops,
 # Apple Silicon on Asahi), whenever the code or the packaging changes.
 on:
@@ -8,7 +8,7 @@ on:
     paths:
       - 'pkgbuild/**'
       - 'bin/**'
-      - 'vitals.pro'
+      - 'montop.pro'
       - 'src/**'
       - 'tests/**'
       - '.github/workflows/package.yml'
@@ -17,7 +17,7 @@ on:
     paths:
       - 'pkgbuild/**'
       - 'bin/**'
-      - 'vitals.pro'
+      - 'montop.pro'
       - 'src/**'
       - 'tests/**'
       - '.github/workflows/package.yml'

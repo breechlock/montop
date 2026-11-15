@@ -34,7 +34,7 @@ public:
     QHash<int, gpu::ProcessUsage> processes(void *) override { return {{4398, {12.5, 221 << 20}}}; }
 };
 
-class VitalsTests : public QObject {
+class MontopTests : public QObject {
     Q_OBJECT
 
 private slots:
@@ -660,47 +660,55 @@ private slots:
     void linksAndRemovesTheSkill()
     {
         QTemporaryDir dir;
-        const QString home = dir.path() + "/home", packaged = dir.path() + "/usr/share/vitals/skills/vitals";
-        const QByteArray text = "---\nname: vitals\ndescription: test\n---\n";
+        const QString home = dir.path() + "/home", packaged = dir.path() + "/usr/share/montop/skills/montop";
+        const QByteArray text = "---\nname: montop\ndescription: test\n---\n";
         QDir().mkpath(home + "/.claude");
-        QDir().mkpath(home + "/.codex/skills/vitals");  // The user's own skill by that name.
-        write(home + "/.codex/skills/vitals/SKILL.md", "---\nname: mine\n---\n");
+        QDir().mkpath(home + "/.codex/skills/montop");  // The user's own skill by that name.
+        write(home + "/.codex/skills/montop/SKILL.md", "---\nname: mine\n---\n");
         QDir().mkpath(packaged);
         write(packaged + "/SKILL.md", text);
 
         // Packaged: links in the shared folder and each agent that is set up.
         SkillChanges changes = installSkill(home, packaged, text);
-        QCOMPARE(QFileInfo(home + "/.agents/skills/vitals").symLinkTarget(), packaged);
-        QCOMPARE(QFileInfo(home + "/.claude/skills/vitals").symLinkTarget(), packaged);
-        QVERIFY(!QFileInfo(home + "/.codex/skills/vitals").isSymLink());
+        QCOMPARE(QFileInfo(home + "/.agents/skills/montop").symLinkTarget(), packaged);
+        QCOMPARE(QFileInfo(home + "/.claude/skills/montop").symLinkTarget(), packaged);
+        QVERIFY(!QFileInfo(home + "/.codex/skills/montop").isSymLink());
         QVERIFY(!QFileInfo::exists(home + "/.pi"));
         QCOMPARE(changes.done.size(), 2);
         QCOMPARE(changes.errors.size(), 1);
         QVERIFY(installSkill(home, packaged, text).done.isEmpty());
 
-        // Removing takes out only Vitals' links.
+        // Removing takes out only Montop' links.
         changes = removeSkill(home, packaged);
         QCOMPARE(changes.done.size(), 2);
-        QVERIFY(!QFileInfo(home + "/.claude/skills/vitals").isSymLink());
-        QVERIFY(QFileInfo::exists(home + "/.codex/skills/vitals/SKILL.md"));
+        QVERIFY(!QFileInfo(home + "/.claude/skills/montop").isSymLink());
+        QVERIFY(QFileInfo::exists(home + "/.codex/skills/montop/SKILL.md"));
         QDir(home + "/.codex").removeRecursively();
 
         // From source: a copy, linked to; and 0.3.0's relative link is taken over.
         QDir().mkpath(home + "/.claude/skills");
-        QVERIFY(QFile::link("../../.agents/skills/vitals", home + "/.claude/skills/vitals"));
+        QVERIFY(QFile::link("../../.agents/skills/montop", home + "/.claude/skills/montop"));
         changes = installSkill(home, dir.path() + "/nowhere", text);
         QVERIFY(changes.errors.isEmpty());
-        QVERIFY(QFileInfo(home + "/.agents/skills/vitals").isDir());
-        QVERIFY(!QFileInfo(home + "/.agents/skills/vitals").isSymLink());
-        QCOMPARE(QFileInfo(home + "/.claude/skills/vitals").symLinkTarget(), home + "/.agents/skills/vitals");
+        QVERIFY(QFileInfo(home + "/.agents/skills/montop").isDir());
+        QVERIFY(!QFileInfo(home + "/.agents/skills/montop").isSymLink());
+        QCOMPARE(QFileInfo(home + "/.claude/skills/montop").symLinkTarget(), home + "/.agents/skills/montop");
         changes = removeSkill(home, packaged);
         QCOMPARE(changes.done.size(), 2);
-        QVERIFY(!QFileInfo::exists(home + "/.agents/skills/vitals"));
-        QVERIFY(!QFileInfo(home + "/.claude/skills/vitals").isSymLink());
+        QVERIFY(!QFileInfo::exists(home + "/.agents/skills/montop"));
+        QVERIFY(!QFileInfo(home + "/.claude/skills/montop").isSymLink());
 
         // A link left dangling by an uninstalled package is cleaned up.
-        QVERIFY(QFile::link(dir.path() + "/gone", home + "/.claude/skills/vitals"));
+        QVERIFY(QFile::link(dir.path() + "/gone", home + "/.claude/skills/montop"));
         QCOMPARE(removeSkill(home, packaged).done.size(), 1);
+
+        // Links from when Montop was called Vitals go; a "vitals" of anyone
+        // else's stays.
+        QVERIFY(QFile::link("/usr/share/vitals/skills/vitals", home + "/.claude/skills/vitals"));
+        QVERIFY(QFile::link(dir.path() + "/someone-elses", home + "/.agents/skills/vitals"));
+        QCOMPARE(removeSkill(home, packaged).done.size(), 1);
+        QVERIFY(!QFileInfo(home + "/.claude/skills/vitals").isSymLink());
+        QVERIFY(QFileInfo(home + "/.agents/skills/vitals").isSymLink());
     }
 
     void readsWhatACgroupUsed()
@@ -909,5 +917,5 @@ private:
     }
 };
 
-QTEST_MAIN(VitalsTests)
-#include "vitals_tests.moc"
+QTEST_MAIN(MontopTests)
+#include "montop_tests.moc"

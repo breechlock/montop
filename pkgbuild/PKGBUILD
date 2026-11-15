@@ -1,13 +1,13 @@
 # Maintainer: Christophe Vanlancker <carroarmato0@gmail.com>
 
-pkgname=vitals
-pkgver=0.4.2
+pkgname=montop
+pkgver=0.5.0
 pkgrel=1
 pkgdesc='A system monitor for Omarchy that shows apps, not just processes'
-url='https://github.com/carroarmato0/vitals'
+url='https://github.com/carroarmato0/montop'
 arch=('x86_64' 'aarch64')
 license=('MIT')
-install='vitals.install'
+install='montop.install'
 options=('!debug')
 depends=('hicolor-icon-theme' 'hwdata' 'qt6-base' 'qt6-declarative' 'qt6-wayland' 'systemd')
 makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
@@ -21,9 +21,9 @@ build() {
 
 package() {
   cd "$startdir/.."
-  install -Dm755 build/vitals "$pkgdir/usr/bin/vitals"
+  install -Dm755 build/montop "$pkgdir/usr/bin/montop"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  install -Dm644 "$startdir/vitals.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/vitals.svg"
-  install -Dm644 "$startdir/vitals.desktop" "$pkgdir/usr/share/applications/vitals.desktop"
-  install -Dm644 src/skill.md "$pkgdir/usr/share/vitals/skills/vitals/SKILL.md"
+  install -Dm644 "$startdir/montop.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/montop.svg"
+  install -Dm644 "$startdir/montop.desktop" "$pkgdir/usr/share/applications/montop.desktop"
+  install -Dm644 src/skill.md "$pkgdir/usr/share/montop/skills/montop/SKILL.md"
 }

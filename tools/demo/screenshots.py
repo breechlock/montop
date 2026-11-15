@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Takes the README screenshots on a Hyprland desktop, from the demo system.
 
-Opens two fullscreen Vitals windows on empty workspaces (Tokyo Night and
-Catppuccin Latte), both watching vitals-demo.py, waits until the graphs are
+Opens two fullscreen Montop windows on empty workspaces (Tokyo Night and
+Catppuccin Latte), both watching montop-demo.py, waits until the graphs are
 full and the demo's build spike is a minute in the past, then drives them
 from the keyboard (wtype) and the pointer (hyprctl) and saves each shot with
 grim. Hands off the mouse while it runs: about four minutes.
 
     tools/demo/screenshots.py [OUTPUT_DIR]     # default: docs/screenshots
 
-Needs hyprctl, wtype, and grim, and a built build/vitals. Run it under
+Needs hyprctl, wtype, and grim, and a built build/montop. Run it under
 `systemd-inhibit --what=idle` so the screen doesn't lock halfway.
 """
 
@@ -23,7 +23,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
-VITALS = os.path.join(REPO, "build", "vitals")
+MONTOP = os.path.join(REPO, "build", "montop")
 OUT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(REPO, "docs", "screenshots"))
 DARK, LIGHT = 8, 9  # Workspaces; empty ones are best.
 SETTLE = 190        # Seconds of history before the first shot.
@@ -98,11 +98,11 @@ def main():
     for tool in ("hyprctl", "wtype", "grim"):
         if not shutil.which(tool):
             sys.exit(f"screenshots.py needs {tool}")
-    if not os.path.exists(VITALS):
-        sys.exit("Build Vitals first: bin/build")
+    if not os.path.exists(MONTOP):
+        sys.exit("Build Montop first: bin/build")
     os.makedirs(OUT, exist_ok=True)
 
-    scratch = tempfile.mkdtemp(prefix="vitals-shots-")
+    scratch = tempfile.mkdtemp(prefix="montop-shots-")
     root = os.path.join(scratch, "root")
     # A theme directory per window, shaped like Omarchy's current/ state.
     themes = {}
@@ -112,20 +112,20 @@ def main():
         os.symlink(os.path.join(THEMES, name), os.path.join(state, "theme"))
         themes[name] = state
 
-    environment = f"VITALS_ROOT={root} XDG_DATA_HOME={root}/share XDG_DATA_DIRS={root}/share"
+    environment = f"MONTOP_ROOT={root} XDG_DATA_HOME={root}/share XDG_DATA_DIRS={root}/share"
     before = {c["pid"] for c in clients()}
     home = json.loads(hyprctl("-j", "activeworkspace"))["id"]
-    generator = subprocess.Popen([sys.executable, os.path.join(HERE, "vitals-demo.py"), root],
+    generator = subprocess.Popen([sys.executable, os.path.join(HERE, "montop-demo.py"), root],
                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         time.sleep(2)
         started = time.monotonic()
         for workspace, theme in ((DARK, "tokyo-night"), (LIGHT, "catppuccin-latte")):
-            launch(f"env {environment} VITALS_THEME={themes[theme]} {VITALS} open", workspace)
+            launch(f"env {environment} MONTOP_THEME={themes[theme]} {MONTOP} open", workspace)
         time.sleep(5)
-        windows = [c for c in clients() if c["pid"] not in before and c["class"] == "vitals"]
+        windows = [c for c in clients() if c["pid"] not in before and c["class"] == "montop"]
         if len(windows) != 2:
-            sys.exit(f"Expected two Vitals windows, found {len(windows)}")
+            sys.exit(f"Expected two Montop windows, found {len(windows)}")
         print(f"Waiting {SETTLE} s for the graphs to fill...", flush=True)
         time.sleep(max(0, SETTLE - (time.monotonic() - started)))
 
@@ -162,7 +162,7 @@ def main():
         shoot("light.png")
     finally:
         for c in clients():
-            if c["pid"] not in before and c["class"] == "vitals":
+            if c["pid"] not in before and c["class"] == "montop":
                 os.kill(c["pid"], 15)
         generator.terminate()
         focus_workspace(home)

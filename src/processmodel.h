@@ -43,7 +43,7 @@ struct GroupInfo {
     // Pausing and limiting go through systemd's user manager, unit by unit.
     QStringList controlUnits; // As systemd names them, escapes and all.
     // Why it can't be paused or limited, or empty when it can: "self"
-    // (Vitals runs inside it), "session" (the desktop needs it), "system"
+    // (Montop runs inside it), "session" (the desktop needs it), "system"
     // (it isn't the user's), or "none" (no cgroup of its own).
     QString control;
     bool frozen = false;

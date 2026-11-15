@@ -10,7 +10,7 @@ ApplicationWindow {
     minimumWidth: 760
     minimumHeight: 520
     visible: true
-    title: "Vitals"
+    title: "Montop"
     color: theme.colors.background
 
     Material.theme: theme.dark ? Material.Dark : Material.Light
@@ -108,7 +108,7 @@ ApplicationWindow {
             win.say(error, true)
         else
             win.say(app.frozen ? qsTr("Resumed %1").arg(app.name)
-                               : qsTr("Paused %1. Press p to resume it; it also resumes when Vitals closes.").arg(app.name))
+                               : qsTr("Paused %1. Press p to resume it; it also resumes when Montop closes.").arg(app.name))
     }
     function askToLimit() {
         const app = selectedApp()
@@ -491,7 +491,7 @@ ApplicationWindow {
             else if (percent === 0)
                 win.say(qsTr("Lifted the CPU limit on %1").arg(name))
             else
-                win.say(qsTr("Limited %1 to %2% CPU. It lifts when Vitals closes.").arg(name).arg(percent))
+                win.say(qsTr("Limited %1 to %2% CPU. It lifts when Montop closes.").arg(name).arg(percent))
         }
 
         anchors.centerIn: parent

@@ -25,7 +25,7 @@ struct CgroupUsage {
 // on it aren't counted twice.
 CgroupUsage readCgroupUsage(const QString &path, const QSet<QString> &physicalDevices);
 
-// What `vitals run` reports, from the last reading and what was tracked
+// What `montop run` reports, from the last reading and what was tracked
 // while the command ran.
 struct RunReport {
     QStringList command;
@@ -38,5 +38,5 @@ struct RunReport {
 QJsonObject runJson(const RunReport &report);
 QString runText(const RunReport &report);
 
-// vitals run [--json] [--interval ms] -- <command> [args...]
+// montop run [--json] [--interval ms] -- <command> [args...]
 int runCommand(const QStringList &arguments);

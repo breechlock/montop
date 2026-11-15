@@ -49,7 +49,7 @@ QString seconds(double s) {
 QString size(double value) { return Monitor::bytes(value).replace(QChar(0x202F), ' '); }
 
 // A command name as systemd wants it in a unit name: anything but
-// letters, digits, and _ . escaped as \xNN, so `vitals open` shows the run as
+// letters, digits, and _ . escaped as \xNN, so `montop open` shows the run as
 // that command.
 QString unitId(const QString &command) {
     QString out;
@@ -63,7 +63,7 @@ QString unitId(const QString &command) {
     return out.isEmpty() ? QString("command") : out;
 }
 
-// Ctrl+C belongs to the command. Vitals waits it out to report on it, with a
+// Ctrl+C belongs to the command. Montop waits it out to report on it, with a
 // handler rather than SIG_IGN: an ignored signal would be inherited by the
 // command, a handler is reset when it starts.
 void carryOn(int) {}
@@ -135,7 +135,7 @@ QString runText(const RunReport &r) {
     const CgroupUsage &u = r.usage;
     const double cpuSeconds = u.cpuUsec / 1e6;
     QStringList out;
-    out << "vitals run: " + r.command.join(' ');
+    out << "montop run: " + r.command.join(' ');
     out << "  Time       " + seconds(r.seconds);
     out << QString("  CPU        %1 of CPU time (user %2, system %3), %4 cores on average, %5 at the peak")
                .arg(seconds(cpuSeconds), seconds(u.userUsec / 1e6), seconds(u.systemUsec / 1e6))
@@ -160,14 +160,14 @@ int runCommand(const QStringList &arguments) {
         "Run a command and report what it used: time, CPU, peak memory, disk IO, how long it waited on CPU, "
         "memory, and disk, and how many processes it ran at most. It counts every process the command starts, "
         "including ones that have already exited. The report goes to stderr, so the command's own output stays "
-        "as it was, and vitals exits with the command's exit code.");
+        "as it was, and montop exits with the command's exit code.");
     parser.addHelpOption();
     parser.addPositionalArgument("run", "", "run");
     parser.addPositionalArgument("command", "The command and its arguments", "<command> [args...]");
     parser.addOption({"json", "Report as JSON (still on stderr)"});
     parser.addOption({"interval", "Milliseconds between samples of memory and CPU peaks (default 250)", "ms", "250"});
-    // Only Vitals' own options come before the command; from its name on,
-    // everything is the command's, so `vitals run make -j8` works without --.
+    // Only Montop' own options come before the command; from its name on,
+    // everything is the command's, so `montop run make -j8` works without --.
     QStringList own = arguments.mid(0, 2), command;
     for (int i = 2; i < arguments.size(); ++i) {
         const QString &a = arguments[i];
@@ -186,7 +186,7 @@ int runCommand(const QStringList &arguments) {
     parser.process(own);
 
     if (command.isEmpty()) {
-        fprintf(stderr, "Name a command: vitals run make -j8\n");
+        fprintf(stderr, "Name a command: montop run make -j8\n");
         return 1;
     }
     bool ok = false;
@@ -202,13 +202,13 @@ int runCommand(const QStringList &arguments) {
     // The command runs in a scope of its own, so its cgroup counts it and
     // everything it starts. A scope is gone the moment its last process
     // exits, taking the final counts with it, so a shell waits there
-    // instead, until Vitals has read them, or a minute if Vitals is gone.
+    // instead, until Montop has read them, or a minute if Montop is gone.
     // `trap :` keeps that shell from dying with the command on Ctrl+C, and
     // isn't inherited by it.
-    const QString unit = QString("app-vitals-%1-%2.scope")
+    const QString unit = QString("app-montop-%1-%2.scope")
                              .arg(unitId(command.first()))
                              .arg(QRandomGenerator::global()->generate(), 8, 16, QLatin1Char('0'));
-    const QString script = "trap : INT QUIT TERM; \"$@\"; echo $? > \"$VITALS_RUN_STATUS\"; exec sleep 60";
+    const QString script = "trap : INT QUIT TERM; \"$@\"; echo $? > \"$MONTOP_RUN_STATUS\"; exec sleep 60";
 
     struct sigaction handler = {};
     handler.sa_handler = carryOn;
@@ -219,7 +219,7 @@ int runCommand(const QStringList &arguments) {
     process.setProcessChannelMode(QProcess::ForwardedChannels);
     process.setInputChannelMode(QProcess::ForwardedInputChannel);
     QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
-    environment.insert("VITALS_RUN_STATUS", statusFile);
+    environment.insert("MONTOP_RUN_STATUS", statusFile);
     process.setProcessEnvironment(environment);
     QElapsedTimer clock;
     clock.start();

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds Vitals the way Omarchy's package repository does, in its clean
+# Builds Montop the way Omarchy's package repository does, in its clean
 # builder container, so a recipe or code change is known to pass there
 # before it reaches a pull request.
 #
@@ -10,7 +10,7 @@
 #   bin/package-check --arch aarch64  # emulated; slow
 #
 # It keeps a clone of omacom/omarchy-pkgs in build/omarchy-pkgs, places
-# pkgbuild/omarchy-pkgs/ in it as pkgbuilds/vitals, runs the repository's own
+# pkgbuild/omarchy-pkgs/ in it as pkgbuilds/montop, runs the repository's own
 # recipe checks, then its bin/build with rootless Podman (or Docker, if
 # CONTAINER_ENGINE=docker). The package lands in
 # build/omarchy-pkgs/build-output/edge/<arch>/.
@@ -38,14 +38,14 @@ export CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 command -v "$CONTAINER_ENGINE" >/dev/null || fail "$CONTAINER_ENGINE is not installed"
 "$CONTAINER_ENGINE" info >/dev/null 2>&1 || fail "'$CONTAINER_ENGINE info' fails; is it set up for your user?"
 
-# The version lives in vitals.pro; both recipes must agree with it.
-version=$(sed -n 's/^VERSION = //p' "$ROOT/vitals.pro")
+# The version lives in montop.pro; both recipes must agree with it.
+version=$(sed -n 's/^VERSION = //p' "$ROOT/montop.pro")
 for recipe in "$RECIPE/PKGBUILD" "$ROOT/pkgbuild/PKGBUILD"; do
   pkgver=$(sed -n 's/^pkgver=//p' "$recipe")
-  [[ $pkgver == "$version" ]] || fail "${recipe#"$ROOT/"} has pkgver $pkgver, vitals.pro has $version"
+  [[ $pkgver == "$version" ]] || fail "${recipe#"$ROOT/"} has pkgver $pkgver, montop.pro has $version"
 done
-cmp -s "$RECIPE/vitals.install" "$ROOT/pkgbuild/vitals.install" ||
-  fail "pkgbuild/vitals.install and pkgbuild/omarchy-pkgs/vitals.install differ"
+cmp -s "$RECIPE/montop.install" "$ROOT/pkgbuild/montop.install" ||
+  fail "pkgbuild/montop.install and pkgbuild/omarchy-pkgs/montop.install differ"
 
 step "Updating omacom/omarchy-pkgs in build/omarchy-pkgs"
 if [[ -d $PKGS/.git ]]; then
@@ -55,9 +55,9 @@ else
 fi
 # PR builds use master's tooling, so this does too.
 git -C "$PKGS" checkout -q --detach origin/master
-rm -rf "$PKGS/pkgbuilds/vitals"
-cp -r "$RECIPE" "$PKGS/pkgbuilds/vitals"
-target="$PKGS/pkgbuilds/vitals"
+rm -rf "$PKGS/pkgbuilds/montop"
+cp -r "$RECIPE" "$PKGS/pkgbuilds/montop"
+target="$PKGS/pkgbuilds/montop"
 
 if $RELEASE; then
   step "Recipe as published: v$version from GitHub"
@@ -71,8 +71,8 @@ else
   # stash create includes changes to tracked files without touching the
   # working tree; new files must be added (git add) to be included.
   tree=$(git -C "$ROOT" stash create)
-  tarball="vitals-$version.tar.gz"
-  git -C "$ROOT" archive --format=tar.gz --prefix="vitals-$version/" -o "$target/$tarball" "${tree:-HEAD}"
+  tarball="montop-$version.tar.gz"
+  git -C "$ROOT" archive --format=tar.gz --prefix="montop-$version/" -o "$target/$tarball" "${tree:-HEAD}"
   sum=$(sha256sum "$target/$tarball" | cut -d' ' -f1)
   sed -i -e "s|^source=.*|source=(\"$tarball\")|" -e "s|^sha256sums=.*|sha256sums=('$sum')|" "$target/PKGBUILD"
   # Plan without the published channel, so a version already on edge still builds.
@@ -85,19 +85,19 @@ for check in pinned-sources pkgname-unique package-metadata pgp-keys-vendored; d
   echo "PASS: $check"
 done
 
-step "Official build: bin/build --package vitals --arch $ARCH ($CONTAINER_ENGINE)"
-(cd "$PKGS" && bin/build --package vitals --arch "$ARCH")
+step "Official build: bin/build --package montop --arch $ARCH ($CONTAINER_ENGINE)"
+(cd "$PKGS" && bin/build --package montop --arch "$ARCH")
 
 out="$PKGS/build-output/edge/$ARCH"
-package=$(ls "$out"/vitals-"$version"-*-"$ARCH".pkg.tar.zst 2>/dev/null | grep -v -- -debug- | head -1)
+package=$(ls "$out"/montop-"$version"-*-"$ARCH".pkg.tar.zst 2>/dev/null | grep -v -- -debug- | head -1)
 [[ -n $package ]] || fail "no package in ${out#"$ROOT/"}"
-! ls "$out"/vitals-debug-* >/dev/null 2>&1 || fail "a debug package was built; keep options=('!debug')"
+! ls "$out"/montop-debug-* >/dev/null 2>&1 || fail "a debug package was built; keep options=('!debug')"
 
 step "Checking ${package#"$ROOT/"}"
 owners=$(bsdtar -tvf "$package" | awk '$3 != "root" || $4 != "root" {print $NF}')
 [[ -z $owners ]] || fail "files not owned by root:root: $owners"
-for file in usr/bin/vitals usr/share/applications/vitals.desktop \
-  usr/share/icons/hicolor/scalable/apps/vitals.svg usr/share/licenses/vitals/LICENSE .INSTALL; do
+for file in usr/bin/montop usr/share/applications/montop.desktop \
+  usr/share/icons/hicolor/scalable/apps/montop.svg usr/share/licenses/montop/LICENSE .INSTALL; do
   bsdtar -tf "$package" "$file" >/dev/null 2>&1 || fail "the package lacks $file"
 done
 echo "PASS: built, tested by check(), files owned by root, no debug package"

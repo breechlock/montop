@@ -122,7 +122,7 @@ public:
     // Pausing (freezing) an app and capping its CPU, through systemd's user
     // manager so systemd stays in charge of its own units. Only the user's
     // apps and background services qualify: not the desktop's own services,
-    // not the system's, and not the app Vitals itself runs in. Returns an
+    // not the system's, and not the app Montop itself runs in. Returns an
     // empty string, or why it didn't happen in a sentence for the window.
     Q_INVOKABLE QString setAppPaused(const QString &groupKey, bool paused);
     // `percent` is of one core, as in the CPU column; 0 lifts the limit.

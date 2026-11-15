@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security issue
-    url: https://github.com/carroarmato0/vitals/security/advisories/new
+    url: https://github.com/carroarmato0/montop/security/advisories/new
     about: Report a vulnerability privately, not in a public issue.

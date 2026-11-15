@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Vitals
+import Montop
 
 Panel {
     id: root

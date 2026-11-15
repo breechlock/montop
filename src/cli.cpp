@@ -318,7 +318,7 @@ const GroupInfo *findApp(const Monitor &monitor, const QString &query, QString &
     if (found.size() == 1)
         return found.first();
     if (found.isEmpty()) {
-        error = "No app called " + query + ". vitals apps lists them.";
+        error = "No app called " + query + ". montop apps lists them.";
     } else {
         QStringList keys;
         for (const GroupInfo *g : found)
@@ -337,18 +337,18 @@ QJsonObject controlJson(const GroupInfo &g) {
 // what they did, and a pause lasts until resume or logout.
 int control(const QStringList &arguments) {
     const QString name = arguments.value(1);
-    Command command(name, name == "pause" ? "Pause an app: freeze every process in it until vitals resume."
+    Command command(name, name == "pause" ? "Pause an app: freeze every process in it until montop resume."
                           : name == "resume" ? "Resume an app that was paused."
                                              : "Cap an app's CPU, in percent of one core, or lift the cap with off.");
     command.json();
-    command.parser.addPositionalArgument("app", "The app's name or key (from vitals apps), a unit, or a PID in it", "<app>");
+    command.parser.addPositionalArgument("app", "The app's name or key (from montop apps), a unit, or a PID in it", "<app>");
     if (name == "limit")
         command.parser.addPositionalArgument("percent", "Percent of one core, as in the CPU column (200 is two cores), or off",
                                              "<percent|off>");
     command.parser.process(arguments);
     const QString query = command.argument(1);
     if (query.isEmpty())
-        return fail("Name the app: vitals " + name + " <app>.");
+        return fail("Name the app: montop " + name + " <app>.");
     double percent = 0;
     if (name == "limit") {
         const QString value = command.argument(2);
@@ -374,10 +374,10 @@ int control(const QStringList &arguments) {
         print(controlJson(*g));
         return 0;
     }
-    print(stdout, name == "pause"    ? "Paused " + g->name + ". Resume it with: vitals resume " + key
+    print(stdout, name == "pause"    ? "Paused " + g->name + ". Resume it with: montop resume " + key
                   : name == "resume" ? "Resumed " + g->name + "."
                   : percent > 0      ? "Limited " + g->name + " to " + QString::number(g->cpuLimit, 'f', 0)
-                                      + "% of one core until logout. Lift it with: vitals limit " + key + " off"
+                                      + "% of one core until logout. Lift it with: montop limit " + key + " off"
                                      : "Lifted the CPU limit on " + g->name + ".");
     return 0;
 }
@@ -442,25 +442,25 @@ QString tilde(const QString &home, const QString &path) {
     return path.startsWith(home + "/") ? "~" + path.mid(home.size()) : path;
 }
 
-// A copy written by `vitals skill install` without the package: a folder
-// holding only the Vitals SKILL.md.
+// A copy written by `montop skill install` without the package: a folder
+// holding only the Montop SKILL.md.
 bool isSkillCopy(const QString &path) {
     const QDir dir(path);
     if (QFileInfo(path).isSymLink() || !dir.exists()
         || dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden) != QStringList{"SKILL.md"})
         return false;
     QFile file(dir.filePath("SKILL.md"));
-    return file.open(QIODevice::ReadOnly) && file.read(64).contains("\nname: vitals\n");
+    return file.open(QIODevice::ReadOnly) && file.read(64).contains("\nname: montop\n");
 }
 
-// Links Vitals made: to the packaged skill, or to the copy (0.3.0 linked
+// Links Montop made: to the packaged skill, or to the copy (0.3.0 linked
 // ~/.claude/skills to it with a relative link, which resolves the same).
 bool isSkillLink(const QString &home, const QString &path, const QString &packaged) {
     const QFileInfo info(path);
     if (!info.isSymLink())
         return false;
     const QString target = info.symLinkTarget();
-    return target == packaged || target == home + "/.agents/skills/vitals";
+    return target == packaged || target == home + "/.agents/skills/montop";
 }
 
 int skill(const QStringList &arguments) {
@@ -478,15 +478,15 @@ int skill(const QStringList &arguments) {
         return 0;
     }
     if (action != "install" && action != "remove")
-        return fail("Use vitals skill to print the skill, vitals skill install, or vitals skill remove.");
+        return fail("Use montop skill to print the skill, montop skill install, or montop skill remove.");
     const SkillChanges changes = action == "install" ? installSkill(QDir::homePath(), PackagedSkill, text)
                                                      : removeSkill(QDir::homePath(), PackagedSkill);
     for (const QString &line : changes.done)
         print(stdout, line);
     for (const QString &line : changes.errors)
-        print(stderr, "vitals: " + line);
+        print(stderr, "montop: " + line);
     if (changes.done.isEmpty() && changes.errors.isEmpty())
-        print(stdout, action == "install" ? "The skill is already set up." : "No Vitals skill to remove.");
+        print(stdout, action == "install" ? "The skill is already set up." : "No Montop skill to remove.");
     return changes.errors.isEmpty() ? 0 : 1;
 }
 
@@ -494,7 +494,7 @@ int help(const QStringList &arguments) {
     const QString topic = arguments.value(2);
     if (isCliCommand(topic) && topic != "help")
         return runCli({arguments[0], topic, "--help"});
-    print(stdout, "Usage: vitals <command> [options]\n\n" + cliSummary());
+    print(stdout, "Usage: montop <command> [options]\n\n" + cliSummary());
     return 0;
 }
 
@@ -587,7 +587,7 @@ QJsonObject snapshotJson(const Monitor &monitor, int top, const QString &sort) {
 QString cliSummary() {
     return "Window:\n"
            "  open                 Open the monitor\n\n"
-           "Commands that need no display (vitals help <command> for options):\n"
+           "Commands that need no display (montop help <command> for options):\n"
            "  snapshot             CPU, memory, disks, network, and the busiest apps and processes\n"
            "  apps                 Every app and service, with what its processes use together\n"
            "  pause <app>          Freeze every process in an app until you resume it\n"
@@ -611,9 +611,21 @@ int runCli(const QStringList &arguments) {
                                  : help(arguments);
 }
 
+// Montop was called Vitals up to 0.4.2. Its links point at a package that's
+// gone once Vitals is removed; only links to exactly that place are touched.
+static void removeOldNameLinks(const QString &home, SkillChanges &changes) {
+    for (const QString &folder : skillFolders(home, false)) {
+        const QString link = home + "/" + folder + "/vitals";
+        const QFileInfo info(link);
+        if (info.isSymLink() && info.symLinkTarget() == "/usr/share/vitals/skills/vitals" && QFile::remove(link))
+            changes.done << "Removed the old Vitals link " + tilde(home, link);
+    }
+}
+
 SkillChanges installSkill(const QString &home, const QString &packaged, const QByteArray &text) {
     SkillChanges changes;
-    const QString shared = home + "/.agents/skills/vitals";
+    removeOldNameLinks(home, changes);
+    const QString shared = home + "/.agents/skills/montop";
     const bool fromPackage = QFileInfo::exists(packaged + "/SKILL.md");
     QString source = packaged;
     if (!fromPackage) {
@@ -628,7 +640,7 @@ SkillChanges installSkill(const QString &home, const QString &packaged, const QB
         const bool same = existing.open(QIODevice::ReadOnly) && existing.readAll() == text;
         existing.close();
         if (QFileInfo::exists(shared) && !isSkillCopy(shared)) {
-            changes.errors << tilde(home, shared) + " isn't Vitals' skill; leaving it alone.";
+            changes.errors << tilde(home, shared) + " isn't Montop' skill; leaving it alone.";
             return changes;
         }
         if (!same) {
@@ -640,7 +652,7 @@ SkillChanges installSkill(const QString &home, const QString &packaged, const QB
         }
     }
     for (const QString &folder : skillFolders(home, true)) {
-        const QString link = home + "/" + folder + "/vitals";
+        const QString link = home + "/" + folder + "/montop";
         if (link == source)
             continue;
         const QFileInfo info(link);
@@ -649,13 +661,13 @@ SkillChanges installSkill(const QString &home, const QString &packaged, const QB
                 continue;
             // A working link elsewhere is the user's own; a dangling one isn't anything.
             if (info.exists() && !isSkillLink(home, link, packaged)) {
-                changes.errors << tilde(home, link) + " isn't Vitals' skill; leaving it alone.";
+                changes.errors << tilde(home, link) + " isn't Montop' skill; leaving it alone.";
                 continue;
             }
             QFile::remove(link);
         } else if (info.exists()) {
             if (!isSkillCopy(link)) {
-                changes.errors << tilde(home, link) + " isn't Vitals' skill; leaving it alone.";
+                changes.errors << tilde(home, link) + " isn't Montop' skill; leaving it alone.";
                 continue;
             }
             QDir(link).removeRecursively();
@@ -671,13 +683,14 @@ SkillChanges installSkill(const QString &home, const QString &packaged, const QB
 
 SkillChanges removeSkill(const QString &home, const QString &packaged) {
     SkillChanges changes;
+    removeOldNameLinks(home, changes);
     for (const QString &folder : skillFolders(home, false)) {
-        const QString path = home + "/" + folder + "/vitals";
+        const QString path = home + "/" + folder + "/montop";
         const QFileInfo info(path);
         if (!info.isSymLink() && !info.exists())
             continue;
         if (isSkillLink(home, path, packaged) || (info.isSymLink() && !info.exists())) {
-            // A link that points nowhere is one Vitals made before it was
+            // A link that points nowhere is one Montop made before it was
             // uninstalled, or the copy it pointed to is gone.
             if (QFile::remove(path))
                 changes.done << "Removed " + tilde(home, path);
@@ -689,7 +702,7 @@ SkillChanges removeSkill(const QString &home, const QString &packaged) {
             else
                 changes.errors << "Couldn't remove " + tilde(home, path);
         } else {
-            changes.errors << tilde(home, path) + " isn't Vitals' skill; leaving it alone.";
+            changes.errors << tilde(home, path) + " isn't Montop' skill; leaving it alone.";
         }
     }
     return changes;

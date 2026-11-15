@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Montop
+Comment=See what your system is doing: CPU, GPU, memory, disks, network, and processes
+Comment[nl]=Zie wat je systeem doet: CPU, GPU, geheugen, schijven, netwerk en processen
+Exec=montop open
+Icon=montop
+Terminal=false
+Categories=System;Monitor;
+Keywords=monitor;task manager;processes;cpu;memory;disk;network;htop;btop;
+StartupWMClass=montop

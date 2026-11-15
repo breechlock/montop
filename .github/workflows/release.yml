@@ -1,10 +1,10 @@
 name: Release
 
-# On a version tag: checks the tag matches the version in vitals.pro and the
+# On a version tag: checks the tag matches the version in montop.pro and the
 # PKGBUILDs, builds and tests the tagged code in omarchy-pkgs' builder, and
 # publishes the GitHub release with the package attached, unless a release
 # for the tag already exists. Omarchy's repository picks the release up on
-# its own once Vitals is in it.
+# its own once Montop is in it.
 on:
   push:
     tags: ['v*']
@@ -21,8 +21,8 @@ jobs:
 
       - name: Check the tag matches the version
         run: |
-          version=$(sed -n 's/^VERSION = //p' vitals.pro)
-          [[ "${GITHUB_REF_NAME}" == "v$version" ]] || { echo "::error::Tag $GITHUB_REF_NAME, but vitals.pro says $version"; exit 1; }
+          version=$(sed -n 's/^VERSION = //p' montop.pro)
+          [[ "${GITHUB_REF_NAME}" == "v$version" ]] || { echo "::error::Tag $GITHUB_REF_NAME, but montop.pro says $version"; exit 1; }
 
       - name: Install bsdtar
         run: sudo apt-get update -q && sudo apt-get install -yq libarchive-tools
@@ -34,10 +34,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          package=$(ls build/omarchy-pkgs/build-output/edge/x86_64/vitals-*-x86_64.pkg.tar.zst)
+          package=$(ls build/omarchy-pkgs/build-output/edge/x86_64/montop-*-x86_64.pkg.tar.zst)
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "$package" --clobber
           else
             gh release create "$GITHUB_REF_NAME" "$package" --verify-tag \
-              --title "Vitals ${GITHUB_REF_NAME#v}" --generate-notes
+              --title "Montop ${GITHUB_REF_NAME#v}" --generate-notes
           fi

@@ -1,13 +1,13 @@
 name: Bug
-description: Something in Vitals is wrong, broken, or misleading
+description: Something in Montop is wrong, broken, or misleading
 labels: [bug]
 body:
   - type: input
     id: version
     attributes:
-      label: Vitals version
-      description: The output of `vitals --version`
-      placeholder: vitals 0.3.1
+      label: Montop version
+      description: The output of `montop --version`
+      placeholder: montop 0.3.1
     validations:
       required: true
 
@@ -24,7 +24,7 @@ body:
     id: what
     attributes:
       label: What's wrong?
-      description: What you did, what you expected, and what Vitals did instead. A screenshot helps for anything on screen.
+      description: What you did, what you expected, and what Montop did instead. A screenshot helps for anything on screen.
     validations:
       required: true
 
@@ -33,6 +33,6 @@ body:
     attributes:
       label: Command output
       description: |
-        If a command misbehaves, its output, or for wrong numbers `vitals snapshot --json`.
+        If a command misbehaves, its output, or for wrong numbers `montop snapshot --json`.
         These list your processes, command lines, and user name: remove anything you'd rather not share.
       render: text

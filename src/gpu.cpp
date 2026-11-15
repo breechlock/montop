@@ -155,7 +155,7 @@ QHash<QString, double> engineShares(const Client &before, const Client &now, dou
     return shares;
 }
 
-// The real NVML, through dlopen. Only the handful of calls Vitals needs are
+// The real NVML, through dlopen. Only the handful of calls Montop needs are
 // declared here; NVML keeps these signatures stable across driver versions.
 class RealNvml : public Nvml {
     struct Utilization { unsigned gpu, memory; };
@@ -418,7 +418,7 @@ void Gpus::sampleDevice(Device &d, Previous &previous, qint64 nowMs) {
         void *handle = previous.nvml;
         if (!handle) {
             clear();
-            d.note = tr("Its driver reports usage only through NVIDIA's NVML library, which Vitals couldn't load.");
+            d.note = tr("Its driver reports usage only through NVIDIA's NVML library, which Montop couldn't load.");
             d.perApp = false;
             return;
         }

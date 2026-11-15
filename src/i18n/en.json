@@ -1,7 +1,7 @@
 {
   "%1 has no cgroup of its own, so it can't be paused or limited.": "%1 has no cgroup of its own, so it can't be paused or limited.",
   "%1 is a system service. Pausing or limiting it needs root.": "%1 is a system service. Pausing or limiting it needs root.",
-  "%1 keeps your desktop running, so Vitals won't pause or limit it.": "%1 keeps your desktop running, so Vitals won't pause or limit it.",
+  "%1 keeps your desktop running, so Montop won't pause or limit it.": "%1 keeps your desktop running, so Montop won't pause or limit it.",
   "%1 min %2 s ago": "%1 min %2 s ago",
   "%1 s ago": "%1 s ago",
   "%n apps": {
@@ -46,7 +46,7 @@
   "Lifted the CPU limit on %1": "Lifted the CPU limit on %1",
   "Limit %1's CPU": "Limit %1's CPU",
   "Limit the selected app's CPU": "Limit the selected app's CPU",
-  "Limited %1 to %2% CPU. It lifts when Vitals closes.": "Limited %1 to %2% CPU. It lifts when Vitals closes.",
+  "Limited %1 to %2% CPU. It lifts when Montop closes.": "Limited %1 to %2% CPU. It lifts when Montop closes.",
   "limited to %1%": "limited to %1%",
   "No limit": "No limit",
   "Not allowed to signal %n of %1's processes: they belong to another user": {
@@ -56,7 +56,7 @@
   "now": "now",
   "Pause or resume the selected app": "Pause or resume the selected app",
   "paused": "paused",
-  "Paused %1. Press p to resume it; it also resumes when Vitals closes.": "Paused %1. Press p to resume it; it also resumes when Vitals closes.",
+  "Paused %1. Press p to resume it; it also resumes when Montop closes.": "Paused %1. Press p to resume it; it also resumes when Montop closes.",
   "Processes at %1": "Processes at %1",
   "Resumed %1": "Resumed %1",
   "Return to now, clear the filter, close this": "Return to now, clear the filter, close this",
@@ -68,5 +68,5 @@
   "This is how things were at %1. Press Esc to return to now first.": "This is how things were at %1. Press Esc to return to now first.",
   "Up to %1%": "Up to %1%",
   "Updates paused": "Updates paused",
-  "Vitals runs inside %1, so it can't pause or limit it without pausing itself.": "Vitals runs inside %1, so it can't pause or limit it without pausing itself."
+  "Montop runs inside %1, so it can't pause or limit it without pausing itself.": "Montop runs inside %1, so it can't pause or limit it without pausing itself."
 }

@@ -3,7 +3,7 @@ post_install() {
   command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t -f usr/share/icons/hicolor
   # A package can't write into home folders, so each user links the skill
   # for their coding agents themselves; it then follows package upgrades.
-  echo "To teach your coding agents to use Vitals, run: vitals skill install"
+  echo "To teach your coding agents to use Montop, run: montop skill install"
 }
 
 post_upgrade() {
@@ -13,6 +13,6 @@ post_upgrade() {
 
 post_remove() {
   post_upgrade
-  echo "If you set up the Vitals skill, its links now point nowhere. Remove them with:"
-  echo "  find ~/.agents/skills ~/.claude/skills ~/.codex/skills -maxdepth 1 -name vitals -xtype l -delete"
+  echo "If you set up the Montop skill, its links now point nowhere. Remove them with:"
+  echo "  find ~/.agents/skills ~/.claude/skills ~/.codex/skills -maxdepth 1 -name montop -xtype l -delete"
 }

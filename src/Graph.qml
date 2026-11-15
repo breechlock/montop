@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Controls
-import Vitals
+import Montop
 
 // A Sparkline reading from the monitor and wired to the window's frame
 // clock, so every graph scrolls in step with the others.

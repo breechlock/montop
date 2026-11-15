@@ -1,4 +1,4 @@
-// vitals — see what the system is doing: CPU, memory, disks, network, and processes.
+// montop — see what the system is doing: CPU, memory, disks, network, and processes.
 
 #include <QGuiApplication>
 #include <QFontDatabase>
@@ -19,33 +19,33 @@
 int main(int argc, char *argv[]) {
     const QByteArray first = argc > 1 ? QByteArray(argv[1]) : QByteArray();
     if (first == "--version" || first == "version") {
-        QTextStream(stdout) << "vitals " VITALS_VERSION "\n";
+        QTextStream(stdout) << "montop " MONTOP_VERSION "\n";
         return 0;
     }
 
-    // Bare vitals prints help, as a command line tool should; the launcher
-    // entry says vitals open. Commands need no display, so they run without
+    // Bare montop prints help, as a command line tool should; the launcher
+    // entry says montop open. Commands need no display, so they run without
     // a GUI application at all.
     if (first != "open") {
         QCoreApplication app(argc, argv);
-        app.setApplicationName("vitals");
-        app.setApplicationVersion(QStringLiteral(VITALS_VERSION));
+        app.setApplicationName("montop");
+        app.setApplicationVersion(QStringLiteral(MONTOP_VERSION));
         const int code = runCli(app.arguments());
         return isCliCommand(first) || first.isEmpty() ? code : 1;
     }
 
     QGuiApplication app(argc, argv);
-    app.setApplicationName("vitals");
-    app.setApplicationVersion(QStringLiteral(VITALS_VERSION));
+    app.setApplicationName("montop");
+    app.setApplicationVersion(QStringLiteral(MONTOP_VERSION));
 
-    // Matches the window to vitals.desktop, so the compositor (Wayland app_id)
+    // Matches the window to montop.desktop, so the compositor (Wayland app_id)
     // and the launcher pick up the installed icon.
-    app.setDesktopFileName("vitals");
-    app.setWindowIcon(QIcon::fromTheme("vitals"));
+    app.setDesktopFileName("montop");
+    app.setWindowIcon(QIcon::fromTheme("montop"));
 
     QQuickStyle::setStyle("Material");
-    qmlRegisterType<Sparkline>("Vitals", 1, 0, "Sparkline");
-    qmlRegisterUncreatableType<ProcessModel>("Vitals", 1, 0, "ProcessModel", "Owned by the monitor");
+    qmlRegisterType<Sparkline>("Montop", 1, 0, "Sparkline");
+    qmlRegisterUncreatableType<ProcessModel>("Montop", 1, 0, "ProcessModel", "Owned by the monitor");
 
     // Installed before anything is translated, and every qsTr() binding is
     // re-evaluated when the Omarchy language changes.
@@ -53,7 +53,7 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     // For screenshots and demos: a theme other than the current one.
-    Theme theme(qEnvironmentVariable("VITALS_THEME"));
+    Theme theme(qEnvironmentVariable("MONTOP_THEME"));
     // Numbers line up in columns only in a monospaced face, and Omarchy's
     // monospace font is the desktop's voice in every terminal and the bar.
     QFont font(theme.font());

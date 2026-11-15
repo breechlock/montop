@@ -16,6 +16,6 @@ What you ran and what you checked by hand, with what you saw. State anything you
 
 <!--
 Before and after, for anything visible in the window. Take them on the demo system
-(tools/demo/vitals-demo.py and VITALS_ROOT), not your own, so they show nothing personal.
+(tools/demo/montop-demo.py and MONTOP_ROOT), not your own, so they show nothing personal.
 If nothing on screen changes: "No visible change: <why>".
 -->

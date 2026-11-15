@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A made-up system for Vitals to watch, for screenshots and demos.
+"""A made-up system for Montop to watch, for screenshots and demos.
 
 Writes a stand-in /proc and /sys under ROOT and keeps their counters moving
 four times a second, following a fixed script: a browser streaming video
@@ -8,8 +8,8 @@ music, a video export held to two cores, a paused game store, and a Rust
 build in a terminal that takes every core for half a minute, about two
 minutes in. Nothing in it comes from the machine it runs on.
 
-    tools/demo/vitals-demo.py ROOT &
-    VITALS_ROOT=ROOT XDG_DATA_HOME=ROOT/share XDG_DATA_DIRS=ROOT/share vitals open
+    tools/demo/montop-demo.py ROOT &
+    MONTOP_ROOT=ROOT XDG_DATA_HOME=ROOT/share XDG_DATA_DIRS=ROOT/share montop open
 
 Standard library only.
 """
@@ -21,23 +21,23 @@ import shutil
 import sys
 import time
 
-TICK = 0.25          # Seconds between updates, Vitals' default interval.
+TICK = 0.25          # Seconds between updates, Montop' default interval.
 HZ = 100             # USER_HZ: ticks per second in /proc.
 CORES = 16
 PAGE = 4096
-UID = os.getuid()    # Vitals treats the user manager of its own uid as "yours".
+UID = os.getuid()    # Montop treats the user manager of its own uid as "yours".
 MANAGER = f"/user.slice/user-{UID}.slice/user@{UID}.service"
 BUILD_START, BUILD_END = 110.0, 142.0  # The build, in seconds from the start.
 
 random.seed(7)
-ROOT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "vitals-demo")
+ROOT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else "montop-demo")
 PROC, SYS = f"{ROOT}/proc", f"{ROOT}/sys"
 GPU_SLOT = "0000:c4:00.0"
 GPU = f"{SYS}/devices/pci0000:00/{GPU_SLOT}"
 
 
 def write(path, text):
-    """Replaces a file whole, so Vitals never reads half of one."""
+    """Replaces a file whole, so Montop never reads half of one."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     temporary = f"{path}.{os.getpid()}.tmp"
     with open(temporary, "w") as f:
@@ -81,7 +81,7 @@ CGROUPS = {
     "bluetooth": "/system.slice/bluetooth.service",
     "upower": "/system.slice/upower.service",
 }
-LIMITS = {"omacut": 200}  # Percent of one core, as `vitals limit` sets it.
+LIMITS = {"omacut": 200}  # Percent of one core, as `montop limit` sets it.
 FROZEN = {"steam"}
 
 
@@ -398,14 +398,14 @@ def main():
     setup()
     counters, alive = Counters(), {}
     start = time.monotonic()
-    # VITALS_DEMO_SKIP=90 starts the script 90 seconds in, to get to the
+    # MONTOP_DEMO_SKIP=90 starts the script 90 seconds in, to get to the
     # build sooner.
-    head_start = float(os.environ.get("VITALS_DEMO_SKIP", "0"))
+    head_start = float(os.environ.get("MONTOP_DEMO_SKIP", "0"))
     t = 0.0
     while t < head_start:
         tick(t, counters, alive)
         t += TICK
-    print(f"vitals-demo: writing {ROOT}", flush=True)
+    print(f"montop-demo: writing {ROOT}", flush=True)
     while True:
         tick(t, counters, alive)
         t += TICK

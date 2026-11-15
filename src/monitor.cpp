@@ -27,7 +27,7 @@ Monitor::Monitor(const QString &procRoot, const QString &sysRoot, QObject *paren
     : QObject(parent), m_proc(procRoot), m_sys(sysRoot) {
     // For screenshots and demos: a made-up system instead of this one
     // (tools/demo writes one), so nothing personal ends up shown.
-    const QString root = qEnvironmentVariable("VITALS_ROOT");
+    const QString root = qEnvironmentVariable("MONTOP_ROOT");
     if (!root.isEmpty() && procRoot == "/proc" && sysRoot == "/sys") {
         m_proc = root + "/proc";
         m_sys = root + "/sys";
@@ -299,7 +299,7 @@ void Monitor::sampleProcessTable() {
 void Monitor::sampleCpu() {
     const QList<CpuTimes> times = parseStat(readFile(m_proc + "/stat"));
     if (times.isEmpty()) {
-        m_error = tr("Can't read %1. Vitals needs the proc filesystem to see the system.").arg(m_proc + "/stat");
+        m_error = tr("Can't read %1. Montop needs the proc filesystem to see the system.").arg(m_proc + "/stat");
         return;
     }
     m_error.clear();
@@ -1014,9 +1014,9 @@ QVariantMap Monitor::app(const QString &groupKey) const {
 
 QString Monitor::refusal(const GroupInfo &g) const {
     if (g.control == "self")
-        return tr("Vitals runs inside %1, so it can't pause or limit it without pausing itself.").arg(g.name);
+        return tr("Montop runs inside %1, so it can't pause or limit it without pausing itself.").arg(g.name);
     if (g.control == "session")
-        return tr("%1 keeps your desktop running, so Vitals won't pause or limit it.").arg(g.name);
+        return tr("%1 keeps your desktop running, so Montop won't pause or limit it.").arg(g.name);
     if (g.control == "system")
         return tr("%1 is a system service. Pausing or limiting it needs root.").arg(g.name);
     if (!g.control.isEmpty() || g.controlUnits.isEmpty())
