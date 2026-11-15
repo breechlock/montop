@@ -28,6 +28,10 @@ specific to Montop.
 
 1. `bin/build`, then try `build/montop open` or a CLI command.
 2. `bin/test` after every backend change. All tests must pass.
+   `bin/lint` after a QML change: qmllint against the generated `Montop`
+   module must report nothing. QML reaches C++ only through that module
+   (`QML_ELEMENT`; `Monitor`, `Theme` and `Translator` are singletons), never
+   through context properties, and delegates are `Bound`.
 3. Every visible string goes through `qsTr`/`tr` and gets a Dutch entry in
    `src/i18n/nl.json`; `shippedCatalogsCoverEveryString` fails otherwise.
 4. `bin/package-check` before committing a packaging change, and before a

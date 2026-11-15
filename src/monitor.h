@@ -2,6 +2,8 @@
 
 #include <QElapsedTimer>
 #include <QHash>
+#include <QQmlEngine>
+#include <QtQml/qqmlregistration.h>
 #include <QList>
 #include <QObject>
 #include <QSet>
@@ -21,6 +23,8 @@
 // directory of fixed files.
 class Monitor : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_SINGLETON
     Q_PROPERTY(QString hostname READ hostname CONSTANT)
     Q_PROPERTY(QString kernel READ kernel CONSTANT)
     Q_PROPERTY(QString cpuModel READ cpuModel CONSTANT)
@@ -64,6 +68,13 @@ public:
     // How many process scans are kept to rewind to: ten minutes at one a
     // second.
     static constexpr int MomentCount = 600;
+
+    // QML reaches the one main() runs as the Monitor singleton.
+    static inline Monitor *qmlInstance = nullptr;
+    static Monitor *create(QQmlEngine *, QJSEngine *) {
+        QJSEngine::setObjectOwnership(qmlInstance, QJSEngine::CppOwnership);
+        return qmlInstance;
+    }
 
     explicit Monitor(const QString &procRoot = "/proc", const QString &sysRoot = "/sys", QObject *parent = nullptr);
 

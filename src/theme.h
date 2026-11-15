@@ -2,6 +2,8 @@
 
 #include <QFileSystemWatcher>
 #include <QHash>
+#include <QQmlEngine>
+#include <QtQml/qqmlregistration.h>
 #include <QObject>
 #include <QProcess>
 #include <QTimer>
@@ -13,6 +15,8 @@
 // rounding.
 class Theme : public QObject {
     Q_OBJECT
+    QML_ELEMENT
+    QML_SINGLETON
     Q_PROPERTY(QString accent READ accent NOTIFY changed)
     Q_PROPERTY(QString accentForeground READ accentForeground NOTIFY changed)
     Q_PROPERTY(QVariantMap colors READ colors NOTIFY changed)
@@ -21,6 +25,13 @@ class Theme : public QObject {
     Q_PROPERTY(QString font READ font CONSTANT)
 
 public:
+    // QML reaches the one main() runs as the Theme singleton.
+    static inline Theme *qmlInstance = nullptr;
+    static Theme *create(QQmlEngine *, QJSEngine *) {
+        QJSEngine::setObjectOwnership(qmlInstance, QJSEngine::CppOwnership);
+        return qmlInstance;
+    }
+
     explicit Theme(const QString &currentDirectory = {}, QObject *parent = nullptr, const QString &hyprctl = {});
     ~Theme() override;
 
