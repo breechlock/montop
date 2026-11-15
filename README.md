@@ -115,6 +115,9 @@ anywhere with cgroups v2, and falls back to plain processes without them.
 CPU% is measured against one core, as in top and htop: an app busy on two cores
 shows 200.
 
+Montop remembers the panels you show, the sort, apps or every process, kernel
+threads, and the update speed, in `~/.config/montop/settings.conf`.
+
 ### From the command line
 
 ```sh

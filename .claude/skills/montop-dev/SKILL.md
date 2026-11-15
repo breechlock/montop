@@ -51,6 +51,10 @@ specific to Montop.
 - Pause and limit act only on `app.slice` and `background.slice` units, never
   on `session.slice`, system services, or the unit Montop runs in. Keep the
   undo-on-close behaviour of the window.
+- The window's settings (panels, sort, grouping, kernel threads, interval)
+  are kept with QtCore's `Settings` in `~/.config/montop/settings.conf`
+  (`Main.qml`); momentary state (pause, filter, rewind) isn't. A new setting
+  goes there too.
 - Screenshots and README examples come from the demo system, never from the
   user's machine: `tools/demo/screenshots.py` under
   `systemd-inhibit --what=idle`, hands off the mouse for four minutes.

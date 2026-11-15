@@ -112,7 +112,9 @@ def main():
         os.symlink(os.path.join(THEMES, name), os.path.join(state, "theme"))
         themes[name] = state
 
-    environment = f"MONTOP_ROOT={root} XDG_DATA_HOME={root}/share XDG_DATA_DIRS={root}/share"
+    # A config home of its own, so your saved settings don't change the shots.
+    environment = (f"MONTOP_ROOT={root} XDG_DATA_HOME={root}/share XDG_DATA_DIRS={root}/share "
+                   f"XDG_CONFIG_HOME={scratch}/config")
     before = {c["pid"] for c in clients()}
     home = json.loads(hyprctl("-j", "activeworkspace"))["id"]
     generator = subprocess.Popen([sys.executable, os.path.join(HERE, "montop-demo.py"), root],

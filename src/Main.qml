@@ -1,7 +1,9 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
 import QtQuick.Layouts
+import Montop
 
 ApplicationWindow {
     id: win
@@ -20,12 +22,55 @@ ApplicationWindow {
     Material.roundedScale: theme.radius
 
     property bool helpVisible: false
-    property bool showCpu: true
-    property bool showMemory: true
-    property bool showDisks: true
-    property bool showNetwork: true
-    property bool showProcesses: true
-    property bool showGpu: true
+    property alias showCpu: settings.showCpu
+    property alias showMemory: settings.showMemory
+    property alias showDisks: settings.showDisks
+    property alias showNetwork: settings.showNetwork
+    property alias showProcesses: settings.showProcesses
+    property alias showGpu: settings.showGpu
+
+    // What you set stays set between runs, in ~/.config/montop/settings.conf:
+    // the panels shown, the sort, apps or every process, kernel threads, and
+    // how often to update. A pause, a filter, or a rewind is for the moment.
+    Settings {
+        id: settings
+        location: StandardPaths.writableLocation(StandardPaths.ConfigLocation) + "/montop/settings.conf"
+        category: "window"
+        property bool showCpu: true
+        property bool showMemory: true
+        property bool showDisks: true
+        property bool showNetwork: true
+        property bool showProcesses: true
+        property bool showGpu: true
+        property int sortColumn: ProcessModel.Cpu
+        property bool descending: true
+        property bool grouped: true
+        property bool kernelThreads: false
+        property int interval: 250
+    }
+    Component.onCompleted: {
+        const model = monitor.processes
+        // Sorting by GPU% means nothing where no GPU reports it per app.
+        if (settings.sortColumn !== ProcessModel.Gpu || monitor.gpuPerApp)
+            model.sortColumn = settings.sortColumn
+        model.descending = settings.descending
+        model.grouped = settings.grouped
+        model.showKernelThreads = settings.kernelThreads
+        monitor.interval = settings.interval
+    }
+    Connections {
+        target: monitor.processes
+        function onSortChanged() {
+            settings.sortColumn = monitor.processes.sortColumn
+            settings.descending = monitor.processes.descending
+        }
+        function onGroupedChanged() { settings.grouped = monitor.processes.grouped }
+        function onFilterChanged() { settings.kernelThreads = monitor.processes.showKernelThreads }
+    }
+    Connections {
+        target: monitor
+        function onIntervalChanged() { settings.interval = monitor.interval }
+    }
     readonly property bool gpuShown: showGpu && monitor.gpus.length > 0
     // Single-letter shortcuts stand down while the filter has the keyboard
     // or a question is open, so typing doesn't kill processes.
