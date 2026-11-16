@@ -20,6 +20,7 @@ HEADERS += \
     src/run.h \
     src/monitor.h \
     src/processmodel.h \
+    src/qmlsingletons.h \
     src/sparkline.h \
     src/theme.h \
     src/translator.h

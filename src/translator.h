@@ -2,8 +2,6 @@
 
 #include <QFileSystemWatcher>
 #include <QHash>
-#include <QQmlEngine>
-#include <QtQml/qqmlregistration.h>
 #include <QJsonValue>
 #include <QLocale>
 #include <QTimer>
@@ -17,21 +15,12 @@
 // CLDR category ({"one": "%n klip", "other": "%n klip"}).
 class Translator : public QTranslator {
     Q_OBJECT
-    QML_ELEMENT
-    QML_SINGLETON
     Q_PROPERTY(QString language READ language NOTIFY changed)
     // The locale numbers and times are formatted in, for QML, where
     // Qt.locale() alone would not re-read when the language changes.
     Q_PROPERTY(QLocale locale READ locale NOTIFY changed)
 
 public:
-    // QML reaches the one main() runs as the Translator singleton.
-    static inline Translator *qmlInstance = nullptr;
-    static Translator *create(QQmlEngine *, QJSEngine *) {
-        QJSEngine::setObjectOwnership(qmlInstance, QJSEngine::CppOwnership);
-        return qmlInstance;
-    }
-
     explicit Translator(const QString &languageFile = {}, const QString &catalogDirectory = ":/i18n",
                         QObject *parent = nullptr);
 

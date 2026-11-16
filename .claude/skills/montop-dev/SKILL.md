@@ -30,8 +30,12 @@ specific to Montop.
 2. `bin/test` after every backend change. All tests must pass.
    `bin/lint` after a QML change: qmllint against the generated `Montop`
    module must report nothing. QML reaches C++ only through that module
-   (`QML_ELEMENT`; `Monitor`, `Theme` and `Translator` are singletons), never
-   through context properties, and delegates are `Bound`.
+   (`QML_ELEMENT`), never through context properties, and delegates are
+   `Bound`. `Monitor`, `Theme` and `Translator` are singletons handing out
+   main()'s objects through the `QML_FOREIGN` stand-ins in `qmlsingletons.h`:
+   `QML_SINGLETON` on a default-constructible class makes Qt build a fresh,
+   idle copy and ignore its `create()`. Lint can't see that; look at the
+   window.
 3. Every visible string goes through `qsTr`/`tr` and gets a Dutch entry in
    `src/i18n/nl.json`; `shippedCatalogsCoverEveryString` fails otherwise.
 4. `bin/package-check` before committing a packaging change, and before a
